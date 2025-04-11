@@ -2,6 +2,24 @@
 
 ## 一、后端项目运行
 
+首先需要自行添加  `.env` 在项目根目录：
+
+![image-20250411210221520](assets/image-20250411210221520.png)
+
+内容如下（需要根据自己的Mysql配置进行调整）：
+
+```
+# 基础配置
+SECRET_KEY=your-secret-key-here
+JWT_SECRET_KEY=your-jwt-secret-key-here
+
+# 数据库配置 MySQL
+DATABASE_URL=mysql+pymysql://用户名:密码@localhost:端口(3306)/数据库名称
+DEV_DATABASE_URL=mysql+pymysql://用户名:密码@localhost:端口(3306)/数据库名称
+TEST_DATABASE_URL=mysql+pymysql://用户名:密码@localhost:端口(3306)/数据库名称
+PROD_DATABASE_URL=mysql+pymysql://用户名:密码@localhost:端口(3306)/数据库名称
+```
+
 - 开发环境
 
 ```bash
@@ -20,6 +38,12 @@ flask run
 flask run --host=0.0.0.0 --debug
 ```
 
+**项目结构：**
+
+![image-20250411210425979](assets/image-20250411210425979.png)
+
+![image-20250411210544140](assets/image-20250411210544140.png)
+
 ## 二、后端自定义命令行指令CLI -- `/app/command.py`
 
 ### 1. `flask init-db`
@@ -29,17 +53,6 @@ flask run --host=0.0.0.0 --debug
 ![image-20250411161945651](assets/image-20250411161945651.png)
 
 ![image-20250411162518655](assets/image-20250411162518655.png)
-
-```.env
-# 基础配置
-SECRET_KEY=your-secret-key-here
-
-# 数据库配置 MySQL
-DATABASE_URL=mysql+pymysql://用户名:密码@localhost:端口(3306)/数据库名称
-DEV_DATABASE_URL=mysql+pymysql://用户名:密码@localhost:端口(3306)/数据库名称
-TEST_DATABASE_URL=mysql+pymysql://用户名:密码@localhost:端口(3306)/数据库名称
-PROD_DATABASE_URL=mysql+pymysql://用户名:密码@localhost:端口(3306)/数据库名称
-```
 
 ### 2. `flask drop-tables <--force>`
 
@@ -135,7 +148,7 @@ if (res.data?.code === 401) {
 }
 ```
 
-### 六、 接口规范
+## 六、 接口规范
 
 根据对上面状态码的理解，后端响应代码尽可能规范以便于前端进行统一的处理：
 
@@ -159,3 +172,10 @@ return jsonify({
 }), 500                # HTTP状态码同步为500
 ```
 
+## 七、 前端修改部分 -- 将`request`分离
+
+![image-20250411211010523](assets/image-20250411211010523.png)
+
+## 可以先将接口定义出来 再往里面填函数
+
+![image-20250411210032974](assets/image-20250411210032974.png)
