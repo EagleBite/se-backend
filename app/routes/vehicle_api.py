@@ -6,7 +6,7 @@ from ..extensions import db
 
 vehicle_bp = Blueprint('vehicle_api', __name__)
 
-@vehicle_bp.route('/user/cars/<int:user_id>', methods=['GET'])
+@vehicle_bp.route('/cars/<int:user_id>', methods=['GET'])
 def get_user_cars(user_id):
     """获取用户车辆列表"""
     logger = get_logger(__name__)
@@ -21,8 +21,11 @@ def get_user_cars(user_id):
             "color": car.color,
             "seats": car.seat_num
         } for car in user.cars]
-        
-        return jsonify(cars), 200
+
+        return jsonify({
+             "code": 200, 
+             "message": "服务器错误",
+              "data":cars}), 200
         
     except Exception as e:
         logger.error(f"获取用户车辆失败: {e}")

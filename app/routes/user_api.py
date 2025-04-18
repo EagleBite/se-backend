@@ -29,6 +29,19 @@ def get_user_basic(user_id):
         age = calculate_age_from_id(user.identity_id) if user.identity_id else None
 
         logger.info(f"获取用户基础数据: {user_id}")
+        data = jsonify({
+                "code": 200,
+                "data": {
+                    "user_id": user.user_id,
+                    "username": user.username,
+                    "gender": user.gender,
+                    "age": age, # 年龄根据身份证号计算
+                    "avatar": user.user_avatar or current_app.config['DEFAULT_AVATAR_URL'],
+                    "rate": float(user.rate) if user.rate else 0.0,
+                    "status": user.status
+                }
+            })
+        print(data)
         return jsonify({
                 "code": 200,
                 "data": {
@@ -93,6 +106,7 @@ def get_user_modifiable_data(user_id):
         age = calculate_age_from_id(user.identity_id) if user.identity_id else None
 
         logger.info(f"获取用户基础数据: {user_id}")
+    
         return jsonify({
                 "code": 200,
                 "data": {
@@ -143,38 +157,14 @@ def update_user(user_id):
     if not request.is_json:
         return jsonify({"code": 400, "message": "请求必须为JSON格式"}), 400
         
-    data = request.get_json()        
+    data = request.get_json()    
+    print(data)    
     try:
         user = User.query.get(user_id)
         if not user:
             return jsonify({"code": 404, "message": "用户不存在"}), 404
-            
-        # 验证并更新数据
-        if 'username' in data:
-            # 检查用户名是否已存在
-            existing = User.query.filter(
-                User.username == data['username'],
-                User.user_id != user_id
-            ).first()
-            if existing:
-                return jsonify({"code": 400, "message": "用户名已被使用"}), 400
-            user.username = data['username']
-            
-        if 'telephone' in data:
-            # 检查手机号是否已存在
-            existing = User.query.filter(
-                User.telephone == data['telephone'],
-                User.user_id != user_id
-            ).first()
-            if existing:
-                return jsonify({"code": 400, "message": "手机号已被使用"}), 400
-            user.telephone = data['telephone']
-            
-        if 'gender' in data:
-            if data['gender'] not in ['男', '女']:
-                return jsonify({"code": 400, "message": "无效的性别参数"}), 400
-            user.gender = data['gender']
-            
+        user.username = data['username']    
+        user.telephone = data['telephone']
         db.session.commit()
         return jsonify({"code": 200, "message": "个人信息已保存"}), 200
         
