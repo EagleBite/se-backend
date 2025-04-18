@@ -10,7 +10,6 @@ auth_bp = Blueprint('auth_api', __name__)
 def register():
     """用户注册"""
     logger = get_logger(__name__)
-
     data = request.get_json()
 
     # 检查请求体是否为空
