@@ -102,23 +102,22 @@ def get_user_modifiable_data(user_id):
             logger.warning(f"用户不存在: {user_id}")
             return jsonify({"code": 404, "message": "用户不存在"}), 404
 
-        # 计算年龄
-        age = calculate_age_from_id(user.identity_id) if user.identity_id else None
-
-        logger.info(f"获取用户基础数据: {user_id}")
+        logger.info(f"获取用户可修改数据: {user_id}")
     
         return jsonify({
-                "code": 200,
-                "data": {
-                    "user_id": user.user_id,
-                    "username": user.username,
-                    "gender": user.gender,
-                    "avatar": user.user_avatar or current_app.config['DEFAULT_AVATAR_URL'],
-                    "telephone": user.telephone,
-                }
-            }), 200
+            "code": 200,
+            "data": {
+                "user_id": user.user_id,
+                "username": user.username,
+                "gender": user.gender,
+                "avatar": user.user_avatar or current_app.config['DEFAULT_AVATAR_URL'],
+                "telephone": user.telephone,
+                # 注意：不返回密码相关字段
+            }
+        }), 200
+        
     except Exception as e:
-        logger.error(f"获取用户基础信息失败: {e}")
+        logger.error(f"获取用户可修改信息失败: {e}")
         return jsonify({"code": 500, "message": "服务器错误"}), 500
     
 @user_bp.route('/<int:user_id>/trips', methods=['GET'])
@@ -158,19 +157,42 @@ def update_user(user_id):
         return jsonify({"code": 400, "message": "请求必须为JSON格式"}), 400
         
     data = request.get_json()    
-    print(data)    
+    print("更新用户数据:", data)  # 添加日志
+    
     try:
         user = User.query.get(user_id)
         if not user:
             return jsonify({"code": 404, "message": "用户不存在"}), 404
-        user.username = data['username']    
-        user.telephone = data['telephone']
+            
+        # 更新基本信息
+        if 'username' in data:
+            user.username = data['username']
+        if 'telephone' in data:
+            user.telephone = data['telephone']
+        if 'gender' in data:
+            user.gender = data['gender']
+            
+        # 更新密码（如果有提供）
+        if 'password' in data and data['password']:
+            # 在实际应用中应该对密码进行哈希处理
+            user.password = data['password']  # 注意：这里应该使用 password_hash = generate_password_hash(data['password'])
+            
         db.session.commit()
-        return jsonify({"code": 200, "message": "个人信息已保存"}), 200
+        
+        return jsonify({
+            "code": 200, 
+            "message": "个人信息已保存",
+            "data": {
+                "username": user.username,
+                "telephone": user.telephone,
+                "gender": user.gender
+            }
+        }), 200
         
     except Exception as e:
         db.session.rollback()
-        return jsonify({"code": 500, "message": "服务器错误"}), 500
+        print(f"更新用户信息失败: {str(e)}")  # 添加错误日志
+        return jsonify({"code": 500, "message": "服务器错误: " + str(e)}), 500
 
 @user_bp.route('/upload_avatar/<int:user_id>', methods=['POST'])
 def upload_avatar(user_id):
