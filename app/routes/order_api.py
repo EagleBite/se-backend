@@ -6,6 +6,7 @@ from ..extensions import db
 import base64
 from ..models import Order, OrderParticipant
 from ..utils.logger import get_logger
+import json
 
 order_bp = Blueprint('order_api', __name__)
 
@@ -175,12 +176,22 @@ def get_managed_orders():
     logger = get_logger(__name__)
     
     try:
-        # 获取查询参数
-        status = request.args.get('status', 'all')
-        order_type = request.args.get('type', 'all')
-        year = request.args.get('year')
-        month = request.args.get('month')
-        
+        params_str = request.args.get('params')
+        if params_str:
+            try:
+                params = json.loads(params_str)
+                status = params.get('status', 'all')
+                order_type = params.get('type', 'all')
+                year = params.get('year', None)
+                month = params.get('month', None)
+            except json.JSONDecodeError:
+                return jsonify({"code": 400, "error": "参数格式错误，params 必须是有效的 JSON"}), 400
+        else:
+            # 如果没有 params，则从普通查询参数中获取
+            status = request.args.get('status', 'all')
+            order_type = request.args.get('type', 'all')
+            year = request.args.get('year', None)
+            month = request.args.get('month', None)
         # 构建基础查询
         query = Order.query.options(
             db.joinedload(Order.initiator),
@@ -194,7 +205,7 @@ def get_managed_orders():
                 query = query.filter(Order.status.notin_(['pending', 'rejected']))
             else:
                 query = query.filter(Order.status == status)
-        
+
         # 类型筛选
         if order_type != 'all':
             query = query.filter(Order.order_type == order_type)
@@ -279,7 +290,6 @@ def get_managed_orders():
                 'rejectReason': order.reject_reason
             }
             orders_data.append(order_data)
-        
         return jsonify({
             "code": 200,
             "data": orders_data
