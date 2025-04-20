@@ -168,3 +168,191 @@ def get_user_trips(user_id):
             "code": 500,
             "error": "获取用户行程失败"
         }), 500
+
+@order_bp.route('/manage/list', methods=['GET'])
+def get_managed_orders():
+    """获取管理后台的订单列表"""
+    logger = get_logger(__name__)
+    
+    try:
+        # 获取查询参数
+        status = request.args.get('status', 'all')
+        order_type = request.args.get('type', 'all')
+        year = request.args.get('year')
+        month = request.args.get('month')
+        
+        # 构建基础查询
+        query = Order.query.options(
+            db.joinedload(Order.initiator),
+            db.joinedload(Order.participants).joinedload(OrderParticipant.participator)
+        )
+        
+        # 状态筛选
+        if status != 'all':
+            if status == 'approved':
+                # approved 包含所有非 pending 和 rejected 的状态
+                query = query.filter(Order.status.notin_(['pending', 'rejected']))
+            else:
+                query = query.filter(Order.status == status)
+        
+        # 类型筛选
+        if order_type != 'all':
+            query = query.filter(Order.order_type == order_type)
+        
+        # 时间筛选 - 重新设计的健壮逻辑
+        if year or month:
+            # 验证年份
+            if year:
+                if not year.isdigit():
+                    return jsonify({
+                        "code": 400,
+                        "error": "年份参数必须是数字"
+                    }), 400
+                year = int(year)
+                current_year = datetime.now().year
+                if not (2020 <= year <= current_year + 1):  # 假设2020年是系统最早年份
+                    return jsonify({
+                        "code": 400,
+                        "error": f"年份必须在2020到{current_year + 1}之间"
+                    }), 400
+            
+            # 验证月份
+            if month:
+                if not month.isdigit():
+                    return jsonify({
+                        "code": 400,
+                        "error": "月份参数必须是数字"
+                    }), 400
+                month = int(month)
+                if not 1 <= month <= 12:
+                    return jsonify({
+                        "code": 400,
+                        "error": "月份必须在1到12之间"
+                    }), 400
+            
+            # 构建时间筛选条件
+            if year and month:
+                # 同时有年和月 - 筛选特定年月
+                start_date = datetime(year, month, 1)
+                if month == 12:
+                    end_date = datetime(year + 1, 1, 1)
+                else:
+                    end_date = datetime(year, month + 1, 1)
+                end_date = end_date - timedelta(seconds=1)
+                query = query.filter(Order.start_time.between(start_date, end_date))
+            elif year:
+                # 只有年 - 筛选整年
+                start_date = datetime(year, 1, 1)
+                end_date = datetime(year + 1, 1, 1) - timedelta(seconds=1)
+                query = query.filter(Order.start_time.between(start_date, end_date))
+            elif month:
+                # 只有月 - 筛选所有年份的这个月
+                query = query.filter(db.extract('month', Order.start_time) == month)
+        
+        # 排序
+        orders = query.order_by(Order.start_time.desc()).all()
+        # 格式化返回数据
+        orders_data = []
+        for order in orders:
+            # 处理头像数据
+            avatar_data = None
+            if order.initiator.user_avatar:
+                if isinstance(order.initiator.user_avatar, bytes):
+                    avatar_data = f"data:image/jpeg;base64,{base64.b64encode(order.initiator.user_avatar).decode('utf-8')}"
+                else:
+                    avatar_data = order.initiator.user_avatar
+            
+            # 格式化日期
+            formatted_date = order.start_time.strftime('%Y年%m月%d日%H:%M')
+            
+            order_data = {
+                'id': order.order_id,
+                'type': order.order_type,
+                'status': order.status,
+                'date': formatted_date,
+                'startPoint': order.start_loc,
+                'endPoint': order.dest_loc,
+                'price': float(order.price),
+                'carType': order.car_type,
+                'publisher': order.initiator.username,
+                'userAvatar': avatar_data or current_app.config['DEFAULT_AVATAR_URL'],
+                'rejectReason': order.reject_reason
+            }
+            orders_data.append(order_data)
+        
+        return jsonify({
+            "code": 200,
+            "data": orders_data
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error fetching managed orders: {str(e)}")
+        return jsonify({
+            "code": 500,
+            "error": "获取订单列表失败"
+        }), 500
+
+@order_bp.route('/manage/<int:order_id>/approve', methods=['POST'])
+def approve_order(order_id):
+    """审核通过订单"""
+    logger = get_logger(__name__)
+    
+    try:
+        order = Order.query.get(order_id)
+        if not order:
+            return jsonify({"code": 404, "error": "订单不存在"}), 404
+        
+        if order.status != 'pending':
+            return jsonify({"code": 400, "error": "只能审核待处理的订单"}), 400
+        
+        # 更新状态为 not-started (根据业务需求)
+        order.status = 'not-started'
+        db.session.commit()
+        
+        return jsonify({
+            "code": 200,
+            "message": "订单审核通过"
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error approving order {order_id}: {str(e)}")
+        return jsonify({
+            "code": 500,
+            "error": "审核订单失败"
+        }), 500
+
+@order_bp.route('/manage/<int:order_id>/reject', methods=['POST'])
+def reject_order(order_id):
+    """拒绝订单"""
+    logger = get_logger(__name__)
+    
+    try:
+        data = request.get_json()
+        if not data or 'reason' not in data:
+            return jsonify({"code": 400, "error": "缺少拒绝原因"}), 400
+        
+        order = Order.query.get(order_id)
+        if not order:
+            return jsonify({"code": 404, "error": "订单不存在"}), 404
+        
+        if order.status != 'pending':
+            return jsonify({"code": 400, "error": "只能拒绝待处理的订单"}), 400
+        
+        # 更新状态和拒绝原因
+        order.status = 'rejected'
+        order.reject_reason = data['reason']
+        db.session.commit()
+        
+        return jsonify({
+            "code": 200,
+            "message": "订单已拒绝"
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error rejecting order {order_id}: {str(e)}")
+        return jsonify({
+            "code": 500,
+            "error": "拒绝订单失败"
+        }), 500

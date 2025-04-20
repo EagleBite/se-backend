@@ -17,9 +17,9 @@ class Order(db.Model):
     start_time = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, comment='出发时间')
     price = db.Column(db.Numeric(10, 2), nullable=False, comment='价格')
     
-    # 修改为直接在db.Enum中定义枚举值
+    # pending-待审核；completed：已完成；rejected：已拒绝；not-started：未开始；in-progress：进行中；to-pay：待付款；to-review：待评价
     status = db.Column(db.Enum(
-        'pending', 'completed', 'to-review', 'not-started', 'in-progress', 
+        'pending', 'completed', 'rejected', 'not-started', 'in-progress', 'to-pay','to-review',
         name='order_status_enum'
     ), default='not-started', nullable=False, index=True, comment='订单状态')
     
@@ -45,7 +45,7 @@ class Order(db.Model):
         back_populates='order',
         cascade='all, delete-orphan'
     )
-
+    reject_reason = db.Column(db.String(200), nullable=True, comment='拒绝原因') # 拒绝原因
     def __repr__(self):
         return f'<Order {self.order_id}: {self.start_loc}→{self.dest_loc}>'
     
@@ -104,7 +104,8 @@ class Order(db.Model):
                 order_type=identity,
                 car_type=car_type,
                 travel_partner_num=data.get('passengerCount'),
-                spare_seat_num=data.get('availableSeats')
+                spare_seat_num=data.get('availableSeats'),
+                reject_reason=None
             )
             db.session.add(order)
             db.session.flush()  # 获取order_id
