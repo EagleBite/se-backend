@@ -5,4 +5,3 @@ from .order import Order
 from .order_participant import OrderParticipant
 
 __all__ = ['User', 'Car', 'Manager', 'Order', 'OrderParticipant']
-

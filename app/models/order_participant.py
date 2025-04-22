@@ -26,7 +26,10 @@ class OrderParticipant(db.Model):
     )
     # 用户参与到订单的身份
     identity = db.Column(
-        db.Enum(ParticipantIdentity),
+        db.Enum(
+        'driver', 'passenger',
+        name='order_type_enum'
+        ),
         nullable=False,
         comment='身份(driver/passenger)'
     )

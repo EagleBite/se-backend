@@ -4,31 +4,9 @@ from enum import Enum
 from ..extensions import db
 from ..utils.logger import get_logger
 
-class OrderStatus(Enum):
-    """订单状态枚举"""
-    PENDING = 'pending'
-    COMPLETED = 'completed'
-    TO_REVIEW = 'to-review'
-    NOT_STARTED = 'not-started'
-    IN_PROGRESS = 'in-progress'
-
-class OrderType(Enum):
-    """订单类型枚举"""
-    DRIVER = 'driver'
-    PASSENGER = 'passenger'
-
-class OrderRate(Enum):
-    """评分枚举"""
-    ZERO = '0'
-    ONE = '1'
-    TWO = '2'
-    THREE = '3'
-    FOUR = '4'
-    FIVE = '5'
-
 class Order(db.Model):
     """拼车订单模型"""
-    __tablename__ = 'orders'  # 使用复数避免SQL关键字冲突
+    __tablename__ = 'orders'
     __table_args__ = {'comment': '拼车订单表'}
     
     order_id = db.Column(db.Integer, primary_key=True, autoincrement=True, comment='订单ID')
@@ -37,16 +15,26 @@ class Order(db.Model):
     dest_loc = db.Column(db.String(100), nullable=False, comment='目的地')
     start_time = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, comment='出发时间')
     price = db.Column(db.Numeric(10, 2), nullable=False, comment='价格')
-    status = db.Column(db.Enum(OrderStatus), 
-                      default=OrderStatus.NOT_STARTED,
-                      nullable=False,
-                      index=True,
-                      comment='订单状态')
-    order_type = db.Column(db.Enum(OrderType), nullable=False, comment='订单类型')
+    
+    # pending-待审核；completed：已完成；rejected：已拒绝；not-started：未开始；in-progress：进行中；to-pay：待付款；to-review：待评价
+    status = db.Column(db.Enum(
+        'pending', 'completed', 'rejected', 'not-started', 'in-progress', 'to-pay','to-review',
+        name='order_status_enum'
+    ), default='not-started', nullable=False, index=True, comment='订单状态')
+    
+    order_type = db.Column(db.Enum(
+        'driver', 'passenger',
+        name='order_type_enum'
+    ), nullable=False, comment='订单类型')
+    
     car_type = db.Column(db.String(50), nullable=True, comment='车型要求')
     travel_partner_num = db.Column(db.Integer, nullable=True, comment='同行人数(乘客订单)')
     spare_seat_num = db.Column(db.Integer, nullable=True, comment='剩余座位(司机订单)')
-    rate = db.Column(db.Enum(OrderRate), nullable=True, comment='评分')
+    
+    rate = db.Column(db.Enum(
+        '0', '1', '2', '3', '4', '5',
+        name='order_rate_enum'
+    ), nullable=True, comment='评分')
 
     # 订单发起者与订单的关系
     initiator = db.relationship('User', back_populates='initiated_orders')
@@ -56,7 +44,7 @@ class Order(db.Model):
         back_populates='order',
         cascade='all, delete-orphan'
     )
-
+    reject_reason = db.Column(db.String(200), nullable=True, comment='拒绝原因') # 拒绝原因
     def __repr__(self):
         return f'<Order {self.order_id}: {self.start_loc}→{self.dest_loc}>'
     
@@ -115,7 +103,8 @@ class Order(db.Model):
                 order_type=identity,
                 car_type=car_type,
                 travel_partner_num=data.get('passengerCount'),
-                spare_seat_num=data.get('availableSeats')
+                spare_seat_num=data.get('availableSeats'),
+                reject_reason=None
             )
             db.session.add(order)
             db.session.flush()  # 获取order_id
@@ -135,5 +124,4 @@ class Order(db.Model):
                 return None, "无效的用户ID"
             logger.error(f"订单创建失败: {str(e)}")
             return None, "数据库操作失败"
-
 

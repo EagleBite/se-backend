@@ -8,6 +8,7 @@ auth_bp = Blueprint('auth_api', __name__)
 
 @auth_bp.route('/register', methods=['POST'])
 def register():
+    print("register")
     """用户注册"""
     logger = get_logger(__name__)
 
