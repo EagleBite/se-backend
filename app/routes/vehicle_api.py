@@ -1,12 +1,12 @@
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import jwt_required, get_jwt_identity
 from ..models import User, Car
+from ..models.association import user_car
 from ..utils.logger import get_logger
 from ..extensions import db
 
 vehicle_bp = Blueprint('vehicle_api', __name__)
 
-@vehicle_bp.route('/user/cars/<int:user_id>', methods=['GET'])
+@vehicle_bp.route('/<int:user_id>', methods=['GET'])
 def get_user_cars(user_id):
     """获取用户车辆列表"""
     logger = get_logger(__name__)
@@ -32,24 +32,68 @@ def get_user_cars(user_id):
         logger.error(f"获取用户车辆失败: {e}")
         return jsonify({"code": 500, "message": "服务器错误"}), 500
 
-@vehicle_bp.route('/user/cars/<int:user_id>', methods=['POST'])
-@jwt_required()
+@vehicle_bp.route('/<int:user_id>', methods=['POST'])
 def add_user_car(user_id):
-    """添加用户车辆"""
+    """添加用户车辆（增强校验版）"""
     logger = get_logger(__name__)
-    user_id = get_jwt_identity()
-    
     data = request.get_json()
-    if not data or not all(k in data for k in ['number', 'color', 'model', 'seats']):
+    
+    # 参数校验
+    required_fields = ['number', 'color', 'model', 'seats']
+    if not data or not all(k in data for k in required_fields):
         return jsonify({"code": 400, "message": "缺少必要参数"}), 400
     
     try:
         # 检查车牌是否已存在
         existing_car = Car.query.filter_by(license=data['number']).first()
+        
         if existing_car:
-            return jsonify({"code": 409, "message": "车牌已存在"}), 409
+            # 比对车辆信息是否完全一致
+            is_info_match = (
+                existing_car.color == data['color'] and
+                existing_car.car_type == data['model'] and
+                existing_car.seat_num == data['seats']
+            )
             
-        # 创建新车
+            if not is_info_match:
+                return jsonify({
+                    "code": 200,
+                    "message": "车辆信息不匹配",
+                    "data": {
+                        "existing_info": {
+                            "color": existing_car.color,
+                            "model": existing_car.car_type,
+                            "seats": existing_car.seat_num
+                        }
+                    }
+                }), 200
+            
+            # 信息一致，检查是否已关联
+            user = User.query.get(user_id)
+            if existing_car in user.cars:
+                return jsonify({
+                    "code": 200,
+                    "message": "车辆已关联",
+                    "data": {
+                        "car_id": existing_car.car_id,
+                        "plate_number": existing_car.license
+                    }
+                }), 200
+                
+            # 添加关联关系
+            user.cars.append(existing_car)
+            db.session.commit()
+            
+            return jsonify({
+                "code": 200,
+                "message": "关联成功",
+                "data": {
+                    "car_id": existing_car.car_id,
+                    "plate_number": existing_car.license
+                }
+            }), 200
+            
+        # 全新车辆
         new_car = Car(
             license=data['number'],
             color=data['color'],
@@ -57,87 +101,161 @@ def add_user_car(user_id):
             seat_num=data['seats']
         )
         db.session.add(new_car)
-        
-        # 关联用户和车辆
         user = User.query.get(user_id)
         user.cars.append(new_car)
-        
         db.session.commit()
         
-        return jsonify({"success": True, "message": "添加成功"}), 200
+        return jsonify({
+            "code": 200,
+            "message": "添加成功",
+            "data": {
+                "car_id": new_car.car_id,
+                "plate_number": new_car.license,
+                "brand_model": new_car.car_type,
+                "color": new_car.color,
+                "seats": new_car.seat_num
+            }
+        }), 200
         
     except Exception as e:
         db.session.rollback()
         logger.error(f"添加车辆失败: {e}")
         return jsonify({"code": 500, "message": "服务器错误"}), 500
 
-@vehicle_bp.route('/user/cars/<string:old_number>', methods=['PUT'])
-@jwt_required()
-def update_user_car(old_number):
-    """更新用户车辆信息"""
+@vehicle_bp.route('/<int:user_id>/<string:old_number>', methods=['PUT'])
+def update_user_car(user_id, old_number):
+    """更新用户车辆信息（增强校验版）"""
     logger = get_logger(__name__)
-    user_id = get_jwt_identity()
-    
     data = request.get_json()
+    
     if not data or not all(k in data for k in ['number', 'color', 'model', 'seats']):
         return jsonify({"code": 400, "message": "缺少必要参数"}), 400
     
     try:
-        # 查找要更新的车辆
+        # 获取当前用户和原车辆
         user = User.query.get(user_id)
-        car = next((c for c in user.cars if c.license == old_number), None)
-        
-        if not car:
-            return jsonify({"code": 404, "message": "车辆不存在"}), 404
+        if not user:
+            return jsonify({"code": 404, "message": "用户不存在"}), 404
             
-        # 检查新车牌是否已被其他车辆使用
-        if data['number'] != old_number:
-            existing = Car.query.filter(
-                Car.license == data['number'],
-                Car.car_id != car.car_id
-            ).first()
-            if existing:
-                return jsonify({"code": 409, "message": "车牌已存在"}), 409
+        original_car = next((c for c in user.cars if c.license == old_number), None)
+        if not original_car:
+            return jsonify({"code": 404, "message": "原车辆不存在"}), 404
         
-        # 更新车辆信息
-        car.license = data['number']
-        car.color = data['color']
-        car.car_type = data['model']
-        car.seat_num = data['seats']
+        # 检查新车牌是否已存在（排除自身）
+        new_number = data['number']
+        existing_car = Car.query.filter(
+            Car.license == new_number,
+            Car.car_id != original_car.car_id
+        ).first()
+        
+        if existing_car:
+            # 比对车辆信息是否完全一致
+            is_info_match = (
+                existing_car.color == data['color'] and
+                existing_car.car_type == data['model'] and
+                existing_car.seat_num == data['seats']
+            )
+            
+            if not is_info_match:
+                return jsonify({
+                    "code": 200,
+                    "message": "车辆信息不匹配",
+                    "data": {
+                        "existing_info": {
+                            "color": existing_car.color,
+                            "model": existing_car.car_type,
+                            "seats": existing_car.seat_num
+                        }
+                    }
+                }), 200
+            
+            # 信息一致，执行合并操作
+            # 1. 将原车的所有关联用户转移到新车上
+            for owner in original_car.owners:
+                if existing_car not in owner.cars:
+                    owner.cars.append(existing_car)
+                owner.cars.remove(original_car)
+            
+            # 2. 删除原车记录
+            db.session.delete(original_car)
+            db.session.commit()
+            
+            return jsonify({
+                "code": 200,
+                "message": "合并成功",
+                "data": {
+                    "car_id": existing_car.car_id,
+                    "plate_number": existing_car.license,
+                    "brand_model": existing_car.car_type,
+                    "color": existing_car.color,
+                    "seats": existing_car.seat_num
+                }
+            }), 200
+        
+        # 普通更新流程（车牌不存在或为自身）
+        original_car.license = new_number
+        original_car.color = data['color']
+        original_car.car_type = data['model']
+        original_car.seat_num = data['seats']
         
         db.session.commit()
         
-        return jsonify({"success": True, "message": "修改成功"}), 200
+        return jsonify({
+            "code": 200,
+            "message": "修改成功",
+            "data": {
+                "car_id": original_car.car_id,
+                "plate_number": original_car.license,
+                "brand_model": original_car.car_type,
+                "color": original_car.color,
+                "seats": original_car.seat_num
+            }
+        }), 200
         
     except Exception as e:
         db.session.rollback()
         logger.error(f"更新车辆失败: {e}")
         return jsonify({"code": 500, "message": "服务器错误"}), 500
-
-@vehicle_bp.route('/user/cars/<string:number>', methods=['DELETE'])
-@jwt_required()
-def unbind_user_car(number):
+@vehicle_bp.route('/<int:user_id>/<string:number>', methods=['DELETE'])
+def unbind_user_car(user_id, number):
     """解绑用户车辆"""
     logger = get_logger(__name__)
-    user_id = get_jwt_identity()
-    
     try:
+        # 获取用户和车辆
         user = User.query.get(user_id)
-        car = next((c for c in user.cars if c.license == number), None)
-        
+        if not user:
+            return jsonify({"code": 404, "message": "用户不存在"}), 404
+            
+        car = Car.query.filter_by(license=number).first()
         if not car:
             return jsonify({"code": 404, "message": "车辆不存在"}), 404
+            
+        # 检查用户是否拥有该车
+        if car not in user.cars:
+            return jsonify({"code": 400, "message": "用户未绑定该车辆"}), 400
             
         # 从用户车辆列表中移除
         user.cars.remove(car)
         
-        # 如果没有其他用户关联这辆车，则删除车辆记录
-        if len(car.owners) == 0:
+        # 检查是否还有其他用户拥有该车
+        other_owners_count = db.session.query(user_car)\
+            .filter(user_car.c.car_id == car.car_id)\
+            .count()
+            
+        # 如果没有其他用户拥有该车，则删除车辆记录
+        if other_owners_count == 0:
             db.session.delete(car)
             
         db.session.commit()
         
-        return jsonify({"success": True, "message": "解绑成功"}), 200
+        return jsonify({
+            "code": 200,
+            "message": "解绑成功",
+            "data": {
+                "car_id": car.car_id,
+                "plate_number": car.license
+            }
+        }), 200
         
     except Exception as e:
         db.session.rollback()

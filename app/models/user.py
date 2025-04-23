@@ -12,10 +12,11 @@ class User(db.Model):
 
     user_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     username = db.Column(db.String(50), nullable=False, unique=True, comment='用户名')
-    user_avatar = db.Column(db.String(255), nullable=True, default=None, comment='头像URL')
+    # 修改为LongBlob类型存储二进制数据
+    user_avatar = db.Column(db.LargeBinary(length=(2**32)-1), nullable=True, comment='头像二进制数据')
     realname = db.Column(db.String(50), nullable=False, comment='真实姓名')
     identity_id = db.Column(db.String(18), nullable=False, unique=True, comment='身份证号')
-    gender = db.Column(db.Enum('男', '女', name='gender_enum'), nullable=False, comment='性别')
+    gender = db.Column(db.Enum('male', 'female', name='gender_enum'), nullable=False, comment='性别')
     telephone = db.Column(db.String(15), nullable=False, unique=True, comment='手机号')
     password_hash = db.Column(db.String(255), nullable=False, comment='加密密码')
     rate = db.Column(db.Numeric(3, 2), default=0.00, comment='评分')
@@ -106,7 +107,7 @@ class User(db.Model):
                 gender=data['gender'],
                 telephone=data['telephone'],
                 password_hash=generate_password_hash(data['password']),
-                user_avatar=current_app.config['DEFAULT_AVATAR_URL']  # 默认头像
+                user_avatar=None  # 默认头像
             )
             db.session.add(user)
             user.update_last_active()

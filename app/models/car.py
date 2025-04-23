@@ -1,5 +1,7 @@
 from ..extensions import db
 from .association import user_car
+# from .association import user_car
+
 
 class Car(db.Model):
     """汽车模型类"""
@@ -22,3 +24,4 @@ class Car(db.Model):
 
     def __repr__(self):
         return f'<Car {self.car_id}: {self.license}>'
+
