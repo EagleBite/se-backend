@@ -22,7 +22,11 @@ def get_user_cars(user_id):
             "seats": car.seat_num
         } for car in user.cars]
         
-        return jsonify(cars), 200
+        return jsonify({
+            "code": 200, 
+            "message": "服务器错误",
+            "data":cars
+        }), 200
         
     except Exception as e:
         logger.error(f"获取用户车辆失败: {e}")

@@ -31,6 +31,7 @@ def get_user_basic(user_id):
         logger.info(f"获取用户基础数据: {user_id}")
         return jsonify({
                 "code": 200,
+                "message": '',
                 "data": {
                     "user_id": user.user_id,
                     "username": user.username,

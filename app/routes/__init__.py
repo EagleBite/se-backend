@@ -11,5 +11,5 @@ def register_blueprints(app):
     app.register_blueprint(auth_blueprint, url_prefix='/api/auth')
     app.register_blueprint(user_blueprint, url_prefix='/api/user')
     app.register_blueprint(trip_blueprint, url_prefix='/api/trip')
-    app.register_blueprint(vehicle_blueprint, url_prefix='/api/user')
+    app.register_blueprint(vehicle_blueprint, url_prefix='/api')
     app.register_blueprint(order_blueprint, url_prefix='/api/order')
