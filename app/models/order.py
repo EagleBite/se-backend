@@ -4,6 +4,28 @@ from enum import Enum
 from ..extensions import db
 from ..utils.logger import get_logger
 
+class OrderStatus(Enum):
+    """订单状态枚举"""
+    PENDING = 'pending'
+    COMPLETED = 'completed'
+    TO_REVIEW = 'to-review'
+    NOT_STARTED = 'not-started'
+    IN_PROGRESS = 'in-progress'
+
+class OrderType(Enum):
+    """订单类型枚举"""
+    DRIVER = 'driver'
+    PASSENGER = 'passenger'
+
+class OrderRate(Enum):
+    """评分枚举"""
+    ZERO = '0'
+    ONE = '1'
+    TWO = '2'
+    THREE = '3'
+    FOUR = '4'
+    FIVE = '5'
+
 class Order(db.Model):
     """拼车订单模型"""
     __tablename__ = 'orders'

@@ -13,6 +13,7 @@ class Config:
     DEBUG = os.getenv("DEBUG", "True") == "True"
     TESTING = os.getenv("TESTING", "False") == "True"
     DEFAULT_AVATAR_URL = "../../static/user.jpeg" # 默认头像URL
+    ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'} # 允许上传的文件格式
 
     # JWT 配置
     # JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", SECRET_KEY)  # 默认使用SECRET_KEY
