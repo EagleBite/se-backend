@@ -124,17 +124,38 @@ def get_calendar_orders(user_id):
     logger = get_logger(__name__)
     
     try:
-        year = int(request.args.get('year', datetime.now().year))
-        month = int(request.args.get('month', datetime.now().month))
+        # 从请求参数中获取 params
+        params_str = request.args.get('params')
+        if not params_str:
+            return jsonify({"code": 400, "error": "缺少 params 参数"}), 400
+        
+        # 解析 params 参数
+        try:
+            params = json.loads(params_str)
+            year = params.get('year')
+            month = params.get('month')
+        except json.JSONDecodeError:
+            return jsonify({"code": 400, "error": "params 参数格式错误，必须是有效的 JSON"}), 400
+        
+        # 验证 year 和 month 是否存在
+        if not year or not month:
+            return jsonify({"code": 400, "error": "缺少 year 或 month 参数"}), 400
+        
+        # 转换 year 和 month 为整数
+        try:
+            year = int(year)
+            month = int(month)
+        except ValueError:
+            return jsonify({"code": 400, "error": "year 和 month 参数必须是整数"}), 400
         
         # 计算月份的开始和结束日期
         start_date = datetime(year, month, 1)
         if month == 12:
             end_date = datetime(year + 1, 1, 1) - timedelta(days=1)
         else:
-            end_date = datetime(year, month + 1, 1) - timedelta(days=1)
+            end_date = datetime(year, month + 1, 1) - timedelta(seconds=1)
         
-        
+        print(start_date, end_date)
         # 查询该用户在该月份内作为发起者或参与者的订单
         orders = Order.query.filter(
             and_(
