@@ -7,7 +7,6 @@ from werkzeug.utils import secure_filename
 import os
 import requests
 import base64
-# from ..models.usercar import UserCar
 from ..models.association import user_car
 
 user_bp = Blueprint('user_api', __name__)
@@ -169,18 +168,14 @@ def calculate_age_from_id(identity_id):
 @user_bp.route('/<int:user_id>/vehicles', methods=['GET'])
 def get_user_vehicles(user_id):
     """获取指定用户的车辆列表 (模拟数据)"""
-    # 在真实应用中，这里应该查询 user_car 和 car 表
     user = User.query.get(user_id)
     if not user:
        return jsonify({"error": "User not found"}), 404
     vehicles = Car.query.join(user_car, user_car.c.user_id == user_id).all()
     result = [{"id": car.car_id, "plateNumber": car.license, "seats": car.seat_num, "carType": car.car_type} for car in vehicles]
-
-    # --- 使用模拟数据 ---
-    # print(f"模拟获取用户 {user_id} 的车辆列表")
-    # mock_vehicles = [
-    #     {"id": 1, "plateNumber": "沪A88888", "seats": 5, "carType": "舒适轿车"},
-    #     {"id": 2, "plateNumber": "沪B66666", "seats": 7, "carType": "商务MPV"},
-    #     {"id": 3, "plateNumber": "沪C12345", "seats": 5, "carType": "经济型"}
-    # ]
-    return jsonify(result), 200
+    print(f"获取用户 {user_id} 的车辆列表成功")
+    return jsonify({
+        "code": 200, 
+        "message": "获取车辆列表成功",
+        "data": result
+    }), 200

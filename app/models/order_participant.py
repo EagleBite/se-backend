@@ -24,11 +24,17 @@ class OrderParticipant(db.Model):
         primary_key=True,
         comment='订单ID'
     )
+    initiator_id = db.Column(
+        db.Integer,
+        db.ForeignKey('user.user_id', ondelete='CASCADE'),
+        nullable=True,
+        comment='发起人ID'
+    )
     # 用户参与到订单的身份
     identity = db.Column(
         db.Enum(
-        'driver', 'passenger',
-        name='order_type_enum'
+            'driver', 'passenger',
+            name='order_type_enum'
         ),
         nullable=False,
         comment='身份(driver/passenger)'
@@ -48,14 +54,15 @@ class OrderParticipant(db.Model):
 
     def __repr__(self):
         return f'<OrderParticipant order:{self.order_id} user:{self.participator_id}>'
-    
+
     @classmethod
-    def create_pariticipant(cls, order_id, user_id, identity):
+    def create_participant(cls, order_id, user_id, identity, initiator_id=None):
         """
         创建订单参与者记录
         :param order_id: 订单ID
         :param user_id: 用户ID
         :param identity: 身份类型
+        :param initiator_id: 发起人ID（可选）
         :return: (order_participant_object, error_message)
         """
         if not order_id or not user_id or not identity:
@@ -66,6 +73,11 @@ class OrderParticipant(db.Model):
             return None, "无效的身份类型"
         
         # 创建参与者记录
-        participant = cls(order_id=order_id, participator_id=user_id, identity=identity)
+        participant = cls(
+            order_id=order_id,
+            participator_id=user_id,
+            identity=identity,
+            initiator_id=initiator_id
+        )
         
         return participant, None
