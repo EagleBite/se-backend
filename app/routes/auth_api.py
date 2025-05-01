@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
-from ..models import User
+from ..models import User, Manager
 from ..extensions import db
 from ..utils.logger import get_logger
 import base64
@@ -84,7 +84,13 @@ def login():
         "user_id": user.user_id,
         "ID": user.identity_id,
     })
-    
+
+    # 检查用户是否为管理员
+    is_manager = 0
+    manager = db.session.query(Manager).filter_by(user_id=user.user_id).first()
+    if manager:
+        is_manager = 1
+    print(is_manager)
     # 处理头像数据 - 如果是二进制数据则转换为base64
     avatar_data = None
     if user.user_avatar:
@@ -106,7 +112,8 @@ def login():
                 "username": user.username,
                 "gender": user.gender,
                 "age": user.calculate_age(user.identity_id), # 年龄根据身份证号计算
-                "avatar": avatar_data or current_app.config['DEFAULT_AVATAR_URL'],               
+                "avatar": avatar_data or current_app.config['DEFAULT_AVATAR_URL'], 
+                "isManager": is_manager  # 是否为管理员              
             },
             "access_token": access_token, # JWT token
         }
