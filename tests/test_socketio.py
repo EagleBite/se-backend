@@ -19,10 +19,10 @@ token = get_token()
 print(f"获取的token: {token}")
 
 # 创建Socket.IO客户端
-sio = Client(logger=True, engineio_logger=True)
+sio = Client()
 sio.connect('http://100.80.119.36:5000', transports=['websocket'], headers={'Authorization': f'Bearer {token}'})
-sio.emit('my_event', {'data': 'Hello, World!'})
-time.sleep(2)
+sio.emit('send_message', {'ConversationId': 1 ,'content': 'Hello, World!'})
+sio.wait()  # 等待1秒钟以确保消息发送完成
 sio.disconnect()
     
 @sio.event

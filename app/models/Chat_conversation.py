@@ -8,6 +8,8 @@ class Conversation(db.Model):
     id = db.Column(db.Integer, primary_key=True, comment='会话ID')
     type = db.Column(db.Enum('private', 'group', name='conversation_type_enum'), nullable=False, comment='会话类型')
     created_at = db.Column(db.DateTime, default=db.func.now(), comment='创建时间')
+    # title = db.Column(db.String(100), nullable=True, comment='会话标题')
+    # avatar = db.Column(db.String(255), nullable=True, comment='会话头像')
 
     # 关联关系
     messages = db.relationship('Message', back_populates='conversation', cascade='all, delete-orphan')

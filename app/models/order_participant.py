@@ -12,45 +12,14 @@ class OrderParticipant(db.Model):
     __table_args__ = {'comment': '订单参与者表'}
 
     # 复合主键
-    participator_id = db.Column(
-        db.Integer, 
-        db.ForeignKey('user.user_id', ondelete='CASCADE'), 
-        primary_key=True,
-        comment='参与者ID'
-    )
-    order_id = db.Column(
-        db.Integer, 
-        db.ForeignKey('orders.order_id', ondelete='CASCADE'), 
-        primary_key=True,
-        comment='订单ID'
-    )
-    initiator_id = db.Column(
-        db.Integer,
-        db.ForeignKey('user.user_id', ondelete='CASCADE'),
-        nullable=True,
-        comment='发起人ID'
-    )
-    # 用户参与到订单的身份
-    identity = db.Column(
-        db.Enum(
-            'driver', 'passenger',
-            name='order_type_enum'
-        ),
-        nullable=False,
-        comment='身份(driver/passenger)'
-    )
+    participator_id = db.Column(db.Integer, db.ForeignKey('user.user_id', ondelete='CASCADE'), primary_key=True, comment='参与者ID')
+    order_id = db.Column(db.Integer, db.ForeignKey('orders.order_id', ondelete='CASCADE'), primary_key=True, comment='订单ID')
+    initiator_id = db.Column(db.Integer, db.ForeignKey('user.user_id', ondelete='CASCADE'), nullable=True, comment='发起人ID')
+    identity = db.Column(db.Enum('driver', 'passenger', name='order_type_enum'), nullable=False, comment='身份(driver/passenger)')
 
-    # 与用户的关系
-    participator = db.relationship(
-        'User', 
-        foreign_keys=[participator_id],
-        back_populates='participated_orders'
-    )
-    # 与订单的关系
-    order = db.relationship(
-        'Order', 
-        back_populates='participants'
-    )
+    # 关系定义
+    participator = db.relationship('User', foreign_keys=[participator_id], back_populates='participated_orders')
+    order = db.relationship('Order', back_populates='participants')
 
     def __repr__(self):
         return f'<OrderParticipant order:{self.order_id} user:{self.participator_id}>'

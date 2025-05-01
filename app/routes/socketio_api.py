@@ -3,6 +3,7 @@ from datetime import datetime
 from ..extensions import socketio
 from ..utils.logger import get_logger
 from ..extensions import db
+from ..models import User, Message, Conversation, ConversationParticipant
 from flask import request, g
 from functools import wraps
 from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
@@ -100,8 +101,6 @@ def handle_connect(auth=None):
 
     online_users[user_id] = request.sid  # 将用户ID和SID存储在active_users字典中
 
-
-
 @socketio.on('disconnect')
 def handle_disconnect():
     """处理断开连接事件"""
@@ -112,92 +111,80 @@ def handle_disconnect():
         online_users.pop(user_id, None)
         logger.info(f"用户 {user_id} 下线")
 
-# ---- 私聊功能 ----
-@socketio.on('private_message')
+@socketio.on('join_conversation')
 @socketio_jwt_required
-def handle_private_message(data):
-    """处理私聊消息"""
+def handle_join_conversation(data):
+    """加入会话"""
     logger = get_logger(__name__)
 
-    logger.info(f"用户 {g.socketio_user_id} 向 {recipient_id} 发送私聊消息: {message}")
+    conversation_id = data['conversationId']
+    user_id = g.socketio_user['id']
 
-    sender_id = g.current_user_id
-    recipient_id = data['to_user_id']
-    content = data['content']
-
-    # 存储消息到数据库
-    message = Message(
-        sender_id=sender_id,
-        recipient_id=recipient_id,
-        content=content,
-        is_group=False
-    )
-    db.session.add(message)
-    db.session.commit()
-
-    # 构造消息体
-    msg_payload = {
-        'message_id': message.id,
-        'sender_id': sender_id,
-        'recipient_id': recipient_id,
-        'content': content,
-        'timestamp': message.created_at.isoformat(),
-        'is_group': False
-    }
-
-    # 发送给接收者（如果在线）
-    if recipient_id in online_users:
-        emit('new_message', msg_payload, room=f"user_{recipient_id}")
-
-    # 同时发给发送者（实现消息同步）
-    emit('new_message', msg_payload, room=request.sid)
-
-# ---- 群聊功能 ----
-@socketio.on('group_message')
-@socketio_jwt_required
-def handle_group_message(data):
-    """处理群聊消息"""
-    logger = get_logger(__name__)
-
-    sender_id = g.current_user_id
-    group_id = data['group_id']
-    content = data['content']
-
-    group_id = data['group_id']
-    sender_id = g.socketio_user_id
-    content = data['content']
-
-    # 验证用户是否在群组中
-    group = Group.query.filter(
-        Group.id == group_id,
-        Group.members.any(id=sender_id)
+    # 验证用户是否在该会话中
+    participant = ConversationParticipant.query.filter_by(
+        conversation_id=conversation_id,
+        user_id=user_id
     ).first()
-    if not group:
-        return emit('error', {'message': '不在该群组中'})
 
-    # 存储消息到数据库
-    message = Message(
-        sender_id=sender_id,
-        group_id=group_id,
-        content=content,
-        is_group=True
-    )
-    db.session.add(message)
-    db.session.commit()
+    if not participant:
+        logger.warning(f"用户 {user_id} 尝试加入未参与的会话 {conversation_id}")
+        return {'code': 403, 'message': 'You are not a participant of this conversation'}
 
-    # 构造消息体
-    msg_payload = {
-        'message_id': message.id,
-        'sender_id': sender_id,
-        'group_id': group_id,
-        'content': content,
-        'timestamp': message.created_at.isoformat(),
-        'is_group': True
-    }
+    # 加入房间
+    room = f'conversation_{conversation_id}'
+    join_room(room)
+    logger.info(f"用户 {user_id} 加入房间 {room}")
 
-    # 广播到群组
-    emit('new_message', msg_payload, room=f"group_{group_id}")
+@socketio.on('send_message')
+@socketio_jwt_required
+def handle_send_message(data):
+    """处理发送消息"""
+    logger = get_logger(__name__)
 
+    try:
+        # 获取消息内容
+        sender_id = g.socketio_user['id']
+        conversation_id = data['conversationId']
+        content = data['content']
+
+        # 1. 存储到数据库
+        new_message = Message(
+            sender_id=sender_id,
+            conversation_id=conversation_id,
+            content=content,
+            message_type=data.get('messageType', 'text'),  # 默认消息类型为文本
+            created_at=datetime.now()
+        )
+        db.session.add(new_message)
+        db.session.commit()
+
+        logger.info(f"消息已存储，ID: {new_message.id}")
+
+        # 2. 构建返回给前端的数据
+        message_data = {
+            'id': new_message.id,
+            'conversationId': conversation_id,
+            'sender': {
+                'id': sender_id,
+                'username': g.socketio_user.get('username'),
+                'avatar': g.socketio_user.get('avatar')
+            },
+            'content': content,
+            'createdAt': new_message.created_at.isoformat(),
+            'type': 'text'
+        }
+
+        # 3. 向该会话的所有成员广播消息
+        room = f'conversation_{conversation_id}'
+        emit('new_message', message_data, room=room)
+        logger.info(f"已向房间 {room} 广播消息")
+    
+    except Exception as e:
+        logger.error(f"处理消息时发生错误: {str(e)}")
+        db.session.rollback()
+        emit('message_error', {'error': '发送消息失败'})
+
+    
 # ---- 群组管理 ----
 @socketio.on('create_group')
 @socketio_jwt_required

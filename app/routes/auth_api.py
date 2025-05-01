@@ -2,7 +2,8 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from ..models import User
 from ..extensions import db
-from ..utils.logger import get_logger
+from ..utils.logger import get_logger, log_requests
+from ..utils.Response import ApiResponse
 import base64
 
 auth_bp = Blueprint('auth_api', __name__)
@@ -58,12 +59,13 @@ def register():
         }), 200
 
 @auth_bp.route('/login', methods=['POST'])
+@log_requests()
 def login():
     """用户登陆"""
     logger = get_logger(__name__)
 
+    # 获取请求数据
     data = request.get_json()
-    
     username = data.get('username')
     password = data.get('password')
 
@@ -71,7 +73,7 @@ def login():
     user = User.query.filter_by(username=username).first()
     if not user or not user.verify_password(password):
         logger.warning(f"用户名或密码错误: {username}")
-        return jsonify({"code": 404, "message": "用户名或密码错误"}), 404
+        return ApiResponse.error("用户名或密码错误", code=401).to_json_response(401)
     
     # 创建JWT token
     access_token = create_access_token(
@@ -93,23 +95,24 @@ def login():
             # 如果avatar是URL字符串，则直接使用
             avatar_data = user.user_avatar
     
-    logger.info(f"用户登录成功: {user.user_id, user.username}")
+    logger.success(f"用户登录成功: {user.user_id, user.username}")
 
-    # 返回用户信息和JWT token
-    return jsonify({
-        "code": 200,
-        "message": "登录成功",
-        "data": {
-            "user": {
-                "userId": user.user_id,
-                "username": user.username,
-                "gender": user.gender,
-                "age": user.calculate_age(user.identity_id), # 年龄根据身份证号计算
-                "avatar": avatar_data or current_app.config['DEFAULT_AVATAR_URL'],               
-            },
-            "access_token": access_token, # JWT token
+    # 构建响应数据
+    user_data = {
+        "userId": user.user_id,
+        "username": user.username,
+        "gender": user.gender,
+        "age": user.calculate_age(user.identity_id),
+        "avatar": avatar_data or current_app.config['DEFAULT_AVATAR_URL']
+    }
+
+    return ApiResponse.success(
+        message="登录成功",
+        data={
+            "user": user_data,
+            "access_token": access_token
         }
-    }), 200
+    ).to_json_response(200)
 
 @auth_bp.route('/refresh', methods=['POST'])
 @jwt_required(refresh=True)  # 必须用refresh_token

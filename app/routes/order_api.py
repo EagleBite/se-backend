@@ -5,12 +5,12 @@ from decimal import Decimal
 from ..extensions import db
 import base64
 from ..models import Order, OrderParticipant
-from ..utils.logger import get_logger
+from ..utils.logger import get_logger, log_requests
+from ..utils.Response import ApiResponse
 import json
+from flask_jwt_extended import jwt_required, get_jwt_identity
 
 order_bp = Blueprint('order_api', __name__)
-
-order_bp = Blueprint('order_api', __name__, url_prefix='/api/orders')
 
 def map_status_to_frontend(db_status):
     """将数据库状态枚举值映射为前端显示的中文字符串"""
@@ -221,10 +221,15 @@ def get_calendar_orders(user_id):
             "error": "获取日历数据失败"
         }), 500
 
-@order_bp.route('/user/<int:user_id>/trips', methods=['GET'])
-def get_user_trips(user_id):
+@order_bp.route('/user/trips', methods=['GET'])
+@jwt_required()
+@log_requests()
+def get_user_trips():
     """获取用户最近的行程记录"""
     logger = get_logger(__name__)
+
+    current_user_id = get_jwt_identity()
+    logger.info(f"获取用户 {current_user_id} 的行程记录")
     
     try:
         # 获取查询参数，限制返回的记录数
@@ -233,10 +238,10 @@ def get_user_trips(user_id):
         # 查询用户作为发起者或参与者的订单
         orders = Order.query.filter(
             or_(
-                Order.initiator_id == user_id,
+                Order.initiator_id == current_user_id,
                 Order.order_id.in_(
                     db.session.query(OrderParticipant.order_id)
-                    .filter(OrderParticipant.participator_id == user_id)
+                    .filter(OrderParticipant.participator_id == current_user_id)
                 )
             )
         ).options(
@@ -268,17 +273,18 @@ def get_user_trips(user_id):
             }
             trips_data.append(trip_data)
         
-        return jsonify({
-            "code": 200,
-            "data": trips_data
-        }), 200
+        logger.success(f"成功获取用户 {current_user_id} 的行程记录")
+        return ApiResponse.success(
+            "获取行程记录成功",
+            data=trips_data
+        ).to_json_response(200)
         
     except Exception as e:
-        logger.error(f"Error fetching user trips: {str(e)}")
-        return jsonify({
-            "code": 500,
-            "error": "获取用户行程失败"
-        }), 500
+        logger.error(f"获取行程记录失败: {str(e)}")
+        return ApiResponse.error(
+            "获取行程记录失败",
+            code=500
+        ).to_json_response(200)
 
 @order_bp.route('/manage/list', methods=['GET'])
 def get_managed_orders():

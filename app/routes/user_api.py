@@ -1,29 +1,32 @@
-from datetime import datetime
-from flask import Blueprint, jsonify, request, current_app
-from ..extensions import db
-from ..models import User,Car
-from ..utils.logger import get_logger
-from werkzeug.utils import secure_filename
-import os
-import requests
 import base64
+from datetime import datetime
+from ..models import User,Car
+from ..utils.logger import get_logger, log_requests
+from ..utils.Response import ApiResponse
 from ..models.association import user_car
+from flask import Blueprint, jsonify, current_app
+from flask_jwt_extended import jwt_required, get_jwt_identity
 
 user_bp = Blueprint('user_api', __name__)
 
-@user_bp.route('/basic/<int:user_id>', methods=['GET'])
-def get_user_basic(user_id):
+@user_bp.route('/basic', methods=['GET'])
+@jwt_required()
+@log_requests()
+def get_user_basic():
     """
     获取用户基础信息
     """
     logger = get_logger(__name__)
 
+    current_user_id = get_jwt_identity()
+    logger.info(f"获取用户 {current_user_id} 的基础信息")
+
     try:
         # 获取用户信息
-        user = User.query.get(user_id)
+        user = User.query.get(current_user_id)
         if not user:
-            logger.warning(f"用户不存在: {user_id}")
-            return jsonify({"code": 404, "message": "用户不存在"}), 404
+            logger.warning(f"用户不存在: {current_user_id}")
+            return ApiResponse.error("用户不存在", code=401).to_json_response(200)
 
         # 计算年龄
         age = calculate_age_from_id(user.identity_id) if user.identity_id else None
@@ -36,36 +39,46 @@ def get_user_basic(user_id):
             else:
                 avatar_data = user.user_avatar
 
-        logger.info(f"获取用户基础数据: {user_id}")
-        return jsonify({
-            "code": 200,
-            "data": {
-                "user_id": user.user_id,
-                "username": user.username,
-                "gender": user.gender,
-                "age": age, # 年龄根据身份证号计算
-                "avatar": avatar_data or current_app.config['DEFAULT_AVATAR_URL'],
-                "rate": float(user.rate) if user.rate else 0.0,
-                "status": user.status
-            }
-        }), 200
-    except Exception as e:
-        logger.error(f"获取用户基础信息失败: {e}")
-        return jsonify({"code": 500, "message": "服务器错误"}), 500
+        # 构建响应数据
+        user_data = {
+            "user_id": user.user_id,
+            "username": user.username,
+            "gender": user.gender,
+            "age": age,
+            "avatar": avatar_data or current_app.config['DEFAULT_AVATAR_URL'],
+            "rate": float(user.rate) if user.rate else 0.0,
+            "status": user.status
+        }
 
-@user_bp.route('/<int:user_id>/profile', methods=['GET'])
-def get_user_profile(user_id):
+        logger.success(f"成功获取用户基础数据: {current_user_id}")
+        return ApiResponse.success(
+            "获取用户基础信息成功",
+            data=user_data
+        ).to_json_response(200)
+
+    except Exception as e:
+        logger.error(f"获取用户基础信息失败: {str(e)}")
+        return ApiResponse.error("服务器内部错误", code=500).to_json_response(200)
+
+@user_bp.route('/profile', methods=['GET'])
+@jwt_required()
+@log_requests()
+def get_user_profile():
     """
     获取用户完整档案（个人中心页面）
     """
     logger = get_logger(__name__)
 
+    current_user_id = get_jwt_identity()
+    logger.info(f"获取用户 {current_user_id} 的档案信息")
+
     try:
         # 获取用户信息
-        user = User.query.get(user_id)
+        user = User.query.get(current_user_id)
         if not user:
-            return jsonify({"code": 404, "message": "用户不存在"}), 404
-        
+            logger.warning(f"用户不存在: {current_user_id}")
+            return ApiResponse.error("用户不存在", code=401).to_json_response(401)
+
         # 处理头像数据
         avatar_data = None
         if user.user_avatar:
@@ -74,6 +87,7 @@ def get_user_profile(user_id):
             else:
                 avatar_data = user.user_avatar
 
+        # 构造响应数据
         profile = {
             "user_info": {
                 "realname": user.realname,
@@ -91,24 +105,33 @@ def get_user_profile(user_id):
             } for car in user.cars]
         }
 
-        return jsonify({"code": 200, "data": profile}), 200
+        logger.success(f"成功获取用户基础数据: {current_user_id}")
+        return ApiResponse.success(
+            "获取用户基础信息成功",
+            data=profile
+        ).to_json_response(200)
     except Exception as e:
-        logger.error(f"获取用户档案失败: {e}")
-        return jsonify({"code": 500, "message": "服务器错误"}), 500
+        logger.error(f"获取用户档案失败: {str(e)}")
+        return ApiResponse.error("服务器内部错误", code=500).to_json_response(200)
 
-@user_bp.route('/<int:user_id>/modifiable_data', methods=['GET'])
-def get_user_modifiable_data(user_id):
+@user_bp.route('/modifiable_data', methods=['GET'])
+@jwt_required()
+@log_requests()
+def get_user_modifiable_data():
     """
     获取用户可修改的信息
     """
     logger = get_logger(__name__)
 
+    current_user_id = get_jwt_identity()
+    logger.info(f"获取用户 {current_user_id} 的可修改信息")
+
     try:
         # 获取用户信息
-        user = User.query.get(user_id)
+        user = User.query.get(current_user_id)
         if not user:
-            logger.warning(f"用户不存在: {user_id}")
-            return jsonify({"code": 404, "message": "用户不存在"}), 404
+            logger.warning(f"用户不存在: {current_user_id}")
+            return ApiResponse.error("用户不存在", code=401).to_json_response(200)
 
         # 处理头像数据
         avatar_data = None
@@ -118,22 +141,23 @@ def get_user_modifiable_data(user_id):
             else:
                 avatar_data = user.user_avatar
 
-        logger.info(f"获取用户可修改数据: {user_id}")
-    
-        return jsonify({
-            "code": 200,
-            "data": {
-                "user_id": user.user_id,
-                "username": user.username,
-                "gender": user.gender,
-                "avatar": avatar_data or current_app.config['DEFAULT_AVATAR_URL'],
-                "telephone": user.telephone,
-            }
-        }), 200
-        
+        # 构建响应数据
+        user_data = {
+            "user_id": user.user_id,
+            "username": user.username,
+            "gender": user.gender,
+            "avatar": avatar_data or current_app.config['DEFAULT_AVATAR_URL'],
+            "telephone": user.telephone,
+        }
+
+        logger.success(f"成功获取用户可修改信息: {current_user_id}")
+        return ApiResponse.success(
+            "获取用户可修改信息成功",
+            data=user_data
+        ).to_json_response(200)        
     except Exception as e:
-        logger.error(f"获取用户可修改信息失败: {e}")
-        return jsonify({"code": 500, "message": "服务器错误"}), 500
+        logger.error(f"获取用户可修改信息失败: {str(e)}")
+        return ApiResponse.error("服务器内部错误", code=500).to_json_response(200)
     
 @user_bp.route('/<int:user_id>/trips', methods=['GET'])
 def get_user_trips(user_id):

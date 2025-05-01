@@ -30,7 +30,7 @@ def register_extensions(app):
     from .models import User
     @jwt.user_lookup_loader
     def user_lookup_callback(_jwt_header, jwt_data):
-        return User.query.get(jwt_data["sub"]["user_id"])
+        return User.query.get(jwt_data["sub"])
         
     @jwt.expired_token_loader
     def expired_token_callback(jwt_header, jwt_payload):
