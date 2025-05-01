@@ -9,7 +9,6 @@ auth_bp = Blueprint('auth_api', __name__)
 
 @auth_bp.route('/register', methods=['POST'])
 def register():
-    print("register")
     """用户注册"""
     logger = get_logger(__name__)
     data = request.get_json()
@@ -64,13 +63,7 @@ def login():
     logger = get_logger(__name__)
 
     data = request.get_json()
-
-    # 检查请求体是否为空
-    if not data:
-        return jsonify({"code": 400, "message": "请求体不能为空"}), 400
     
-    logger.debug(f"登录请求数据: {data}")
-
     username = data.get('username')
     password = data.get('password')
 
@@ -80,10 +73,16 @@ def login():
         logger.warning(f"用户名或密码错误: {username}")
         return jsonify({"code": 404, "message": "用户名或密码错误"}), 404
     
-    access_token = create_access_token(identity={
-        "user_id": user.user_id,
-        "ID": user.identity_id,
-    })
+    # 创建JWT token
+    access_token = create_access_token(
+        identity=str(user.user_id),
+        additional_claims={
+            "user_info": {
+                "ID": user.identity_id,
+                "username": user.username
+            }
+        }
+    )
     
     # 处理头像数据 - 如果是二进制数据则转换为base64
     avatar_data = None

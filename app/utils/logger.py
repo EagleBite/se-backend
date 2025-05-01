@@ -80,7 +80,8 @@ def setup_app_logger(app=None, log_dir: str = 'logs', max_bytes: int = 10*1024*1
     # 设置处理器和日志级别
     app.logger.addHandler(file_handler)
     app.logger.addHandler(console_handler)
-    app.logger.setLevel(logging.DEBUG if app.debug else logging.INFO)
+    # app.logger.setLevel(logging.DEBUG if app.debug else logging.INFO)
+    app.logger.setLevel(logging.DEBUG)
     
     # 禁止传播到父记录器
     app.logger.propagate = False

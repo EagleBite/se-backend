@@ -24,31 +24,16 @@ class User(db.Model):
     status = db.Column(db.Enum('在线', '离线', '隐身', name='user_status_enum'), nullable=False, default='离线', comment='用户状态')
     last_active = db.Column(db.DateTime, comment='最后活跃时间')
 
-    # 管理员角色（一个用户最多一个管理员身份）
-    manager_role = db.relationship('Manager', back_populates='user', uselist=False, cascade='all, delete-orphan')
+    # 关系
+    manager_role = db.relationship('Manager', back_populates='user', uselist=False, cascade='all, delete-orphan')  # 一对一
+    cars = db.relationship('Car', secondary=user_car, back_populates='owners', lazy='dynamic', cascade='save-update, merge')  # 多对多
+    participated_orders = db.relationship('OrderParticipant', foreign_keys='OrderParticipant.participator_id', back_populates='participator', cascade='all, delete-orphan')  # 一对多
+    initiated_orders = db.relationship('Order', foreign_keys='Order.initiator_id', back_populates='initiator', cascade='all, delete-orphan')  # 一对多
+    sent_messages = db.relationship('Message', foreign_keys='Message.sender_id', back_populates='sender', cascade='all, delete-orphan')  # 一对多
+    conversations = db.relationship('ConversationParticipant', back_populates='user', cascade='all, delete-orphan')
 
-    # 多对多关系（一个用户可拥有多辆车）
-    cars = db.relationship(
-        'Car', 
-        secondary=user_car,  # 指定关联表
-        back_populates='owners',  # 双向关系
-        lazy='dynamic',  # 延迟加载
-        cascade='save-update, merge'
-    )
-    # 参与的订单（一个用户可以参与到多个订单中）
-    participated_orders = db.relationship(
-        'OrderParticipant',
-        foreign_keys='OrderParticipant.participator_id',
-        back_populates='participator',
-        cascade='all, delete-orphan'
-    )
-    # 订单发起者与订单的关系
-    initiated_orders = db.relationship(
-        'Order',
-        foreign_keys='Order.initiator_id',
-        back_populates='initiator',
-        cascade='all, delete-orphan'
-    )
+    def __repr__(self):
+        return f'<User {self.user_id}: {self.username}>'
 
     # 密码加密处理
     @property
@@ -72,9 +57,6 @@ class User(db.Model):
         self.last_active = datetime.utcnow()
         db.session.add(self)
         db.session.commit()
-
-    def __repr__(self):
-        return f'<User {self.user_id}: {self.username}>'
     
     @classmethod
     def calculate_age(cls, indentity_id):

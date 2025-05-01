@@ -1,7 +1,5 @@
 from ..extensions import db
 from .association import user_car
-# from .association import user_car
-
 
 class Car(db.Model):
     """汽车模型类"""

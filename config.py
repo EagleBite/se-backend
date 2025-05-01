@@ -27,7 +27,7 @@ class DevelopmentConfig(Config):
     ENV = "development"
     DEBUG = True
     SQLALCHEMY_DATABASE_URI = os.getenv("DEV_DATABASE_URL", "sqlite:///dev.db")
-    # JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=3)  # 开发环境延长有效期
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=3)  # 开发环境延长有效期
 
 class TestingConfig(Config):
     """测试环境配置"""
@@ -35,7 +35,7 @@ class TestingConfig(Config):
     TESTING = True
     SQLALCHEMY_DATABASE_URI = os.getenv("TEST_DATABASE_URL", "sqlite:///test.db")
     SQLALCHEMY_ECHO = False  # 测试时关闭SQL日志
-    # JWT_ACCESS_TOKEN_EXPIRES = timedelta(seconds=300)  # 测试环境短有效期
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(seconds=300)  # 测试环境短有效期
 
 class ProductionConfig(Config):
     """生产环境配置"""
@@ -43,5 +43,5 @@ class ProductionConfig(Config):
     DEBUG = False
     SQLALCHEMY_DATABASE_URI = os.getenv("PROD_DATABASE_URL", "sqlite:///prod.db")
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")  # 生产环境必须显式配置
-    # JWT_ACCESS_TOKEN_EXPIRES = timedelta(minutes=30)  # 生产环境较短有效期
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(minutes=30)  # 生产环境较短有效期
     # 其他生产环境配置

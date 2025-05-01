@@ -2,11 +2,11 @@
 
 ## 一、后端项目运行
 
-首先需要自行添加  `.env` 在项目根目录：
+首先需要自行添加 `.env` 在项目根目录：
 
 ![image-20250411210221520](assets/image-20250411210221520.png)
 
-内容如下（需要根据自己的Mysql配置进行调整）：
+内容如下（需要根据自己的 Mysql 配置进行调整）：
 
 ```
 # 基础配置
@@ -36,6 +36,7 @@ flask run
 
 ```bash
 flask run --host=0.0.0.0 --debug
+python wsgi.py
 ```
 
 **项目结构：**
@@ -44,11 +45,11 @@ flask run --host=0.0.0.0 --debug
 
 ![image-20250411210544140](assets/image-20250411210544140.png)
 
-## 二、后端自定义命令行指令CLI -- `/app/command.py`
+## 二、后端自定义命令行指令 CLI -- `/app/command.py`
 
 ### 1. `flask init-db`
 
-功能：根据model层定义的模型类（`db.Model`）初始化数据库（**注：无法覆盖已经建立的表，需要先删除才可以重新创建**）。
+功能：根据 model 层定义的模型类（`db.Model`）初始化数据库（**注：无法覆盖已经建立的表，需要先删除才可以重新创建**）。
 
 ![image-20250411161945651](assets/image-20250411161945651.png)
 
@@ -76,7 +77,7 @@ flask run --host=0.0.0.0 --debug
 
 ## 三、后端日志记录 -- `/app/utils/logger.py`
 
-## 四、前端封装http请求 -- `/utils/request.js`
+## 四、前端封装 http 请求 -- `/utils/request.js`
 
 ```js
 /**
@@ -85,32 +86,32 @@ flask run --host=0.0.0.0 --debug
  * 1. 自动添加基础URL和认证Token
  * 2. 统一的请求/响应拦截器
  * 3. 快捷的HTTP方法封装（GET/POST/PUT/DELETE）
- * 
+ *
  * @example 基本使用
  * import { get, post } from '@/utils/request'
- * 
+ *
  * // GET请求
  * get('/api/user').then(res => {...})
- * 
+ *
  * // POST请求
  * post('/api/login', {username, password}).then(res => {...})
- * 
+ *
  * // 文件上传
  * upload('/api/upload', filePath).then(res => {...})
  */
 ```
 
-## 五、 HTTP状态码与业务状态码
+## 五、 HTTP 状态码与业务状态码
 
-### HTTP状态码（由网络层返回）
+### HTTP 状态码（由网络层返回）
 
 前端通过`res.statusCode`获取，通常表示请求的基本状态：
 
 | 状态码 |          含义          |     使用场景     |
 | :----: | :--------------------: | :--------------: |
 |  200   |      **请求**成功      | 接口正常返回数据 |
-|  401   | 未授权（Unauthorized） |    Token失效     |
-|  403   | 禁止访问（Forbidden）  |  Token权限不足   |
+|  401   | 未授权（Unauthorized） |    Token 失效    |
+|  403   | 禁止访问（Forbidden）  |  Token 权限不足  |
 |  500   |     服务器内部错误     |   后端代码异常   |
 
 ```js
