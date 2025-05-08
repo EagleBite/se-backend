@@ -179,3 +179,119 @@ def get_user_vehicles(user_id):
         "message": "获取车辆列表成功",
         "data": result
     }), 200
+
+@user_bp.route('/upload_avatar/<int:user_id>', methods=['POST'])
+def upload_avatar(user_id):
+    """
+    上传/更新用户头像 (Base64版本)
+    """
+    logger = get_logger(__name__)
+
+    # 检查是否有Base64编码的图片数据
+    if not request.is_json or 'base64_data' not in request.json:
+        logger.error("没有上传Base64数据")
+        return jsonify({"code": 400, "message": "请上传Base64数据"}), 400
+
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            logger.error(f"用户不存在: {user_id}")
+            return jsonify({"code": 404, "message": "用户不存在"}), 404
+
+        # 处理Base64上传
+        base64_str = request.json['base64_data'].split(',')[-1]  # 去掉Base64前缀(如果有)
+        avatar_data = base64.b64decode(base64_str)  # 解码Base64字符串为二进制数据
+        user.user_avatar = avatar_data
+
+        db.session.commit()
+
+        logger.info(f"用户 {user_id} 上传头像成功")
+        return jsonify({
+            "code": 200,
+            "message": "头像上传成功"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"上传头像失败: {e}")
+        return jsonify({"code": 500, "message": f"服务器错误: {str(e)}"}), 500
+
+@user_bp.route('/avatar/<int:user_id>', methods=['GET'])
+def get_avatar(user_id):
+    """
+    获取用户头像(Base64版本)
+    """
+    logger = get_logger(__name__)
+
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            logger.warning(f"用户不存在: {user_id}")
+            return jsonify({"code": 404, "message": "用户不存在"}), 404
+
+        if not user.user_avatar:
+            return jsonify({
+                "code": 200,
+                "data": {
+                    "avatar_url": current_app.config['DEFAULT_AVATAR_URL']
+                }
+            }), 200
+
+        # 将二进制数据编码为Base64字符串
+        avatar_base64 = base64.b64encode(user.user_avatar).decode('utf-8')
+        # 添加Data URL前缀
+        avatar_url = f"data:image/jpeg;base64,{avatar_base64}"
+
+        return jsonify({
+            "code": 200,
+            "data": {
+                "avatar_url": avatar_url
+            }
+        }), 200
+    except Exception as e:
+        logger.error(f"获取用户头像失败: {e}")
+
+@user_bp.route('/update/<int:user_id>', methods=['POST'])
+def update_user(user_id):
+    logger = get_logger(__name__)
+
+    # 确保请求包含JSON数据
+    if not request.is_json:
+        return jsonify({"code": 400, "message": "请求必须为JSON格式"}), 400
+
+    data = request.get_json()    
+    logger.debug(f"更新用户数据: {data}")
+
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"code": 404, "message": "用户不存在"}), 404
+
+        # 更新基本信息
+        if 'username' in data:
+            user.username = data['username']
+        if 'telephone' in data:
+            user.telephone = data['telephone']
+        if 'gender' in data:
+            user.gender = data['gender']
+
+        # 更新密码（如果有提供）
+        if 'password' in data and data['password']:
+            user.set_password(data['password'])
+
+        db.session.commit()
+
+        return jsonify({
+            "code": 200, 
+            "message": "个人信息已保存",
+            "data": {
+                "username": user.username,
+                "telephone": user.telephone,
+                "gender": user.gender
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"更新用户信息失败: {e}")
+        return jsonify({"code": 500, "message": "服务器错误: " + str(e)}), 500
