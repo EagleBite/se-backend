@@ -597,7 +597,6 @@ def get_trip_detail(order_id):
 def mark_order_as_paid(order_id):
     """标记订单为已支付并更新状态为 completed"""
     logger = get_logger(__name__)
-    print("hi")
     try:
         # 查询订单
         order = Order.query.get(order_id)
@@ -609,7 +608,7 @@ def mark_order_as_paid(order_id):
             return jsonify({"code": 400, "error": f"订单当前状态为 '{order.status}'，无法标记为已支付"}), 400
 
         # 更新订单状态为 completed
-        order.status = 'completed'
+        order.status = 'to-review'
         db.session.commit()
 
         logger.info(f"订单 {order_id} 已标记为已支付")
