@@ -4,7 +4,7 @@ from sqlalchemy import and_, or_
 from decimal import Decimal
 from ..extensions import db
 import base64
-from ..models import Order, OrderParticipant
+from ..models import Order, OrderParticipant,User
 from ..utils.logger import get_logger, log_requests
 from ..utils.Response import ApiResponse
 import json
@@ -108,7 +108,7 @@ def create_order():
         db.session.commit()  # 提交事务
 
         print(f"新订单创建成功，ID: {new_order.order_id}, 发起人: {initiator_id}, 类型: {identity}")
-        return jsonify({"message": "订单发布成功", "orderId": new_order.order_id}), 200  # Created
+        return jsonify({"code": 200,"message": "订单发布成功"}), 200  # Created
 
     except Exception as e:
         db.session.rollback()
@@ -151,7 +151,7 @@ def get_calendar_orders(user_id):
         # 计算月份的开始和结束日期
         start_date = datetime(year, month, 1)
         if month == 12:
-            end_date = datetime(year + 1, 1, 1) - timedelta(days=1)
+            end_date = datetime(year + 1, 1, 1) - timedelta(seconds=1)
         else:
             end_date = datetime(year, month + 1, 1) - timedelta(seconds=1)
         
@@ -201,7 +201,7 @@ def get_calendar_orders(user_id):
                 'participants_count': len(order.participants)
             }
             orders_data.append(order_data)
-        
+
         # 统一返回格式
         return jsonify({
             "code": 200,
@@ -482,3 +482,145 @@ def reject_order(order_id):
             "code": 500,
             "error": "拒绝订单失败"
         }), 500
+    
+def map_status_to_frontend(db_status):
+    """将数据库状态枚举值映射为前端显示的中文字符串"""
+    mapping = {
+        'PENDING': '处理中',
+        'COMPLETED': '已完成',
+        'TO_REVIEW': '待评价',
+        'NOT_STARTED': '未开始', # 初始状态
+        'IN_PROGRESS': '进行中',
+        'REJECTED': '已拒绝'
+    }
+    return mapping.get(db_status, db_status)
+
+def format_datetime(dt):
+    """将 datetime 对象格式化为前端适用的字符串"""
+    if isinstance(dt, datetime):
+        return dt.strftime('%Y-%m-%d %H:%M')
+    return str(dt)
+
+def decimal_to_float(d):
+    """将 Decimal 类型转换为 float 类型，用于 JSON 序列化"""
+    if isinstance(d, Decimal):
+        return float(d)
+    return d
+
+@order_bp.route('/<int:order_id>/rate', methods=['POST'])
+def rate_trip(order_id):
+    """提交对特定行程/订单的评分"""
+    try:
+        # 获取请求体数据
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "请求体不能为空"}), 400
+
+        # 验证评分值
+        rating_value = data.get('rating_value')
+        if rating_value is None or not isinstance(rating_value, int) or not (0 <= rating_value <= 5):
+            return jsonify({"error": "无效的评分值。必须是 0 到 5 之间的整数。"}), 400
+
+        # 查询订单
+        order = db.session.query(Order).filter_by(order_id=order_id).first()
+        if not order:
+            return jsonify({"error": "未找到该行程"}), 404
+
+        # 验证订单状态是否允许评分
+        if order.status != "to-review":  # 确保状态为 "待评价"
+            return jsonify({"error": f"订单当前状态为 '{order.status}'，无法进行评分"}), 400
+
+        # 更新订单评分和状态
+        order.status = "completed"  # 更新状态为 "已完成"
+        db.session.commit()
+
+        print(f"订单 {order_id} 评分成功，评分为 {rating_value} 星。")
+        return jsonify({"code": 200,"message": "评价提交成功！"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"评价行程 {order_id} 时出错: {e}")
+        description = str(e)
+        return jsonify({"error": "服务器内部错误", "description": description}), 500
+    pass
+
+@order_bp.route('/<int:order_id>', methods=['GET'])
+def get_trip_detail(order_id):
+    """获取特定行程/订单的详细信息"""
+    try:
+        # 查询订单
+        order = db.session.query(Order).filter_by(order_id=order_id).first()
+        if not order:
+            return jsonify({"error": "未找到该行程"}), 404
+
+        # 查询司机信息
+        driver_participant = db.session.query(OrderParticipant)\
+            .filter_by(order_id=order.order_id, identity='driver')\
+            .first()
+
+        driver_info = {
+            "userAvatar": '',
+            "orderCount": 0,
+            "driverUserId": None
+        }
+        if driver_participant:
+            driver = db.session.query(User).filter_by(user_id=driver_participant.participator_id).first()
+            if driver:
+                # 处理头像数据
+                if driver.user_avatar:
+                    if isinstance(driver.user_avatar, bytes):
+                        driver_info["userAvatar"] = f"data:image/jpeg;base64,{base64.b64encode(driver.user_avatar).decode('utf-8')}"
+                    else:
+                        driver_info["userAvatar"] = driver.user_avatar
+
+                driver_info["orderCount"] = driver.order_time or 0
+                driver_info["driverUserId"] = driver.user_id
+
+        # 构造返回数据
+        trip_data = {
+            "id": order.order_id,
+            "date": format_datetime(order.start_time),
+            "startPoint": order.start_loc,
+            "endPoint": order.dest_loc,
+            "price": decimal_to_float(order.price) if order.price else 0.0,
+            "carType": order.car_type or "未知车型",  # 使用 orders 表中的 car_type
+            "orderCount": driver_info["orderCount"],
+            "userAvatar": driver_info["userAvatar"],
+            "state": map_status_to_frontend(order.status),
+            "driverUserId": driver_info["driverUserId"],
+        }
+        print(trip_data)
+        return jsonify({
+            "code": 200, 
+            "message": "获取行程信息成功",
+            "data": trip_data
+            }), 200
+    except Exception as e:
+        print(f"获取行程 {order_id} 详情时出错: {e}")
+        return jsonify({"error": "服务器内部错误"}), 500
+
+@order_bp.route('/<int:order_id>/paid', methods=['POST'])
+def mark_order_as_paid(order_id):
+    """标记订单为已支付并更新状态为 completed"""
+    logger = get_logger(__name__)
+    try:
+        # 查询订单
+        order = Order.query.get(order_id)
+        if not order:
+            return jsonify({"code": 404, "error": "订单不存在"}), 404
+
+        # 验证订单当前状态是否允许支付
+        if order.status != 'to-pay':  # 假设支付前的状态为 'to-pay'
+            return jsonify({"code": 400, "error": f"订单当前状态为 '{order.status}'，无法标记为已支付"}), 400
+
+        # 更新订单状态为 completed
+        order.status = 'to-review'
+        db.session.commit()
+
+        logger.info(f"订单 {order_id} 已标记为已支付")
+        return jsonify({"code": 200, "message": "订单支付成功"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"标记订单 {order_id} 为已支付时出错: {str(e)}")
+        return jsonify({"code": 500, "error": "标记订单为已支付失败"}), 500

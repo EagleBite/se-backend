@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
-from ..models import User
+from ..models import User, Manager
 from ..extensions import db
 from ..utils.logger import get_logger, log_requests
 from ..utils.Response import ApiResponse
