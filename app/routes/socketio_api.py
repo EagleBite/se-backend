@@ -32,21 +32,17 @@ def socketio_jwt_required(fn):
             auth_header = request.headers.get('Authorization')
             if auth_header and auth_header.startswith('Bearer '):
                 token = auth_header[7:]
-                logger.debug(f"从请求头获取到Token [sid: {sid}]")
 
             # 方式2: 从查询参数获取
             if not token and request.args.get('token'):
                 token = request.args.get('token')
-                logger.debug(f"从查询参数获取到Token [sid: {sid}]")
 
             # 方式3: 从Socket.IO握手时的auth获取
             if not token and hasattr(request, 'auth') and request.auth:
                 if isinstance(request.auth, dict) and 'token' in request.auth:
                     token = request.auth['token']
-                    logger.debug(f"从Socket.IO auth获取到Token [sid: {sid}]")
                 elif isinstance(request.auth, str):
                     token = request.auth
-                    logger.debug(f"从Socket.IO auth(字符串)获取到Token [sid: {sid}]")
 
             if not token:
                 logger.warning(f"未找到认证Token [sid: {sid}]")
@@ -63,7 +59,6 @@ def socketio_jwt_required(fn):
                 'sid': sid
             }
 
-            logger.success(f"用户认证成功 [user_id: {decoded['sub']}, sid: {sid}]")
             return fn(*args, **kwargs)
         
         except ExpiredSignatureError:
@@ -130,6 +125,30 @@ def handle_join_conversation(data):
     join_room(room)
     logger.info(f"用户 {user_id} 加入房间 {room}")
 
+@socketio.on('leave_conversation')
+@socketio_jwt_required
+def handle_leave_conversation(data):
+    """离开会话"""
+    logger = get_logger(__name__)
+
+    conversation_id = data['conversationId']
+    user_id = g.socketio_user['id']
+
+    # 验证用户是否在该会话中（可选，根据业务需求）
+    participant = ConversationParticipant.query.filter_by(
+        conversation_id=conversation_id,
+        user_id=user_id
+    ).first()
+
+    if not participant:
+        logger.warning(f"用户 {user_id} 尝试离开未参与的会话 {conversation_id}")
+        return {'code': 403, 'message': 'You are not a participant of this conversation'}
+
+    # 离开房间
+    room = f'conversation_{conversation_id}'
+    leave_room(room)
+    logger.info(f"用户 {user_id} 离开房间 {room}")
+
 @socketio.on('send_message')
 @socketio_jwt_required
 def handle_send_message(data):
@@ -171,6 +190,11 @@ def handle_send_message(data):
 
         # 3. 向该会话的所有成员广播消息
         room = f'conversation_{conversation_id}'
+
+        # 获取房间内的客户端数量
+        clients_in_room = len(socketio.server.manager.rooms.get(room, {}))
+        logger.info(f"准备向房间 {room} 广播消息，当前房间内用户数: {clients_in_room}")
+
         emit('new_message', message_data, room=room)
         logger.info(f"已向房间 {room} 广播消息")
     
@@ -178,37 +202,6 @@ def handle_send_message(data):
         logger.error(f"处理消息时发生错误: {str(e)}")
         db.session.rollback()
         emit('message_error', {'error': '发送消息失败'})
-
-    
-# ---- 群组管理 ----
-@socketio.on('create_group')
-@socketio_jwt_required
-def handle_create_group(data):
-    """创建群组"""
-    logger = get_logger(__name__)
-
-    user_id = g.current_user_id
-    group_name = data['name']
-    member_ids = data.get('members', [])
-
-    # 确保创建者在成员中
-    if user_id not in member_ids:
-        member_ids.append(user_id)
-
-    # 创建群组
-    group = Group(name=group_name)
-    members = User.query.filter(User.id.in_(member_ids)).all()
-    group.members.extend(members)
-    
-    db.session.add(group)
-    db.session.commit()
-    
-    # 通知所有成员
-    emit('group_created', {
-        'group_id': group.id,
-        'name': group.name,
-        'members': [m.id for m in members]
-    }, room=f"group_{group.id}")
 
 
 @socketio.on('test_event') 

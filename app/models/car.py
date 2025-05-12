@@ -2,7 +2,18 @@ from ..extensions import db
 from .association import user_car
 
 class Car(db.Model):
-    """汽车模型类"""
+    """
+    汽车表
+    +------------+--------------+------+-----+---------+----------------+
+    | Field      | Type         | Null | Key | Default | Comment        |
+    +------------+--------------+------+-----+---------+----------------+
+    | car_id     | Integer      | NO   | PRI | NULL    | 车辆ID         |
+    | license    | String(10)   | NO   | UNI | NULL    | 车牌号         |
+    | car_type   | String(50)   | NO   |     | NULL    | 车型           |
+    | color      | String(20)   | NO   |     | NULL    | 颜色           |
+    | seat_num   | Integer      | NO   |     | NULL    | 座位数         |
+    +------------+--------------+------+-----+---------+----------------+
+    """
     __tablename__ = 'car'
     __table_args__ = {'comment': '汽车表'}
     

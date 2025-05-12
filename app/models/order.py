@@ -1,8 +1,9 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import Enum
 from ..extensions import db
 from ..utils.logger import get_logger
+from ..models import User
 
 class OrderStatus(Enum):
     """订单状态枚举"""
@@ -20,8 +21,8 @@ class OrderStatus(Enum):
 
 class OrderType(Enum):
     """订单类型枚举"""
-    DRIVER = 'driver'
-    PASSENGER = 'passenger'
+    PERSON_FIND_CAR = 'person-find-car' # 人找车 -- 当前没有司机 -- 司机接单后转变为车找人
+    CAR_FIND_PERSON = 'car-find-person' # 车找人 -- 当前车没有坐满
 
     @classmethod
     def values(cls):
@@ -53,12 +54,12 @@ class Order(db.Model):
     | start_time          | DateTime               | NO   |     | CURRENT_TIMESTAMP   | 出发时间                    |
     | price               | Numeric(10,2)          | NO   |     | NULL                | 价格(精度:2位小数)          |
     | status              | Enum                   | NO   | MUL | 'not-started'       | 订单状态(建立索引)          |
-    | order_type          | Enum                   | NO   |     | NULL                | 订单类型(driver/passenger)  |
+    | order_type          | Enum                   | NO   |     | NULL                | 订单类型(人找车/车找人)     |
     | car_type            | String(50)             | YES  |     | NULL                | 车型要求                    |
-    | travel_partner_num  | Integer                | YES  |     | NULL                | 同行人数(乘客订单)          |
-    | spare_seat_num      | Integer                | YES  |     | NULL                | 剩余座位(司机订单)          |
-    | rate                | Enum                   | YES  |     | NULL                | 评分(0-5)                   |
-    | reject_reason       | String(200)            | YES  |     | NULL                | 拒绝原因                    |
+    | travel_partner_num  | Integer                | YES  |     | NULL                | 同行人数(人找车订单)        |
+    | spare_seat_num      | Integer                | YES  |     | NULL                | 剩余座位(车找人订单)        |
+    | rate                | Enum                   | YES  |     | NULL                | 评分(0-5)                  |
+    | reject_reason       | String(200)            | YES  |     | NULL                | 拒绝原因                   |
     +---------------------+------------------------+------+-----+---------------------+-----------------------------+
     """
     __tablename__ = 'orders'
@@ -73,18 +74,20 @@ class Order(db.Model):
     status = db.Column(db.Enum(*OrderStatus.values(), name='order_status_enum'), default=OrderStatus.NOT_STARTED.value ,nullable=False, index=True, comment='订单状态')
     order_type = db.Column(db.Enum(*OrderType.values(), name='order_type_enum'), nullable=False, comment='订单类型')
     car_type = db.Column(db.String(50), nullable=True, comment='车型要求')
-    travel_partner_num = db.Column(db.Integer, nullable=True, comment='同行人数(乘客订单)')
-    spare_seat_num = db.Column(db.Integer, nullable=True, comment='剩余座位(司机订单)')
+    travel_partner_num = db.Column(db.Integer, nullable=True, comment='同行人数(人找车订单)')
+    spare_seat_num = db.Column(db.Integer, nullable=True, comment='剩余座位(车找人订单)')
     rate = db.Column(db.Enum(*OrderRate.values(), name='order_rate_enum'), nullable=True, comment='评分')
     reject_reason = db.Column(db.String(200), nullable=True, comment='拒绝原因')
 
     # 关联关系
-    initiator = db.relationship('User', back_populates='initiated_orders')                                   # 订单发起者
-    participants = db.relationship('OrderParticipant', back_populates='order', cascade='all, delete-orphan') # 订单参与者
-    messages = db.relationship('Message', back_populates='order')                                            # 发送该订单邀请的消息
-    
+    initiator = db.relationship('User', back_populates='initiated_orders')                                         # 订单发起者
+    participants = db.relationship('OrderParticipant', back_populates='order', cascade='all, delete-orphan')       # 订单参与者
+    messages = db.relationship('Message', back_populates='order')                                                  # 发送该订单邀请的消息
+    order_conversations = db.relationship('Conversation', back_populates='order', cascade='all, delete-orphan')    # 订单对应的会话
+
     def __repr__(self):
         return f'<Order {self.order_id}: {self.start_loc}→{self.dest_loc}>'
+        
     
     @classmethod
     def create_carpool_order(cls, data):

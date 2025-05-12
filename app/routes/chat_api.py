@@ -80,26 +80,25 @@ def get_conversations():
                     'realname': p.user.realname,
                     'last_read_message_id': p.last_read_message_id
                 })
-
+            
             # 构建会话数据
             conversation_data = {
                 'conversation_id': conversation.id,
                 'type': conversation.type,
                 'created_at': conversation.created_at.isoformat() if conversation.created_at else None,
-                # 'title': conversation.title if conversation.title else None,
-                # 'avatar': base64.b64encode(conversation.avatar).decode('utf-8') if conversation.avatar else None,
+                'title': conversation.title if conversation.title else None,
+                'avatar': base64.b64encode(conversation.avatar).decode('utf-8') if conversation.avatar else None,
                 'unread_count': Message.query.filter(
                     Message.conversation_id == conversation.id,
-                    Message.id > participant.last_read_message_id,
-                    Message.sender_id != current_user_id
-                ).count(),
+                    Message.sender_id != current_user_id,
+                    Message.id > participant.last_read_message_id
+                ).count() if participant.last_read_message_id is not None else 0,
                 'last_message': {
                     'message_id': last_message.id if last_message else None,
                     'content': last_message.content if last_message else None,
                     'type': last_message.message_type if last_message else None,
                     'sender_id': last_message.sender_id if last_message else None,
                     'created_at': last_message.created_at.isoformat() if last_message else None,
-                    'is_read': last_message.is_read if last_message else None
                 } if last_message else None,
                 'participants': participants_info
             }
@@ -183,7 +182,6 @@ def get_messages(conversation_id):
                 'message_id': msg.id,
                 'content': msg.content,
                 'type': msg.message_type,
-                'is_read': msg.is_read,
                 'created_at': msg.created_at.isoformat(),
                 'sender': {
                     'user_id': msg.sender.user_id,

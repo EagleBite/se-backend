@@ -6,8 +6,24 @@ class ParticipantIdentity(Enum):
     DRIVER = 'driver'
     PASSENGER = 'passenger'
 
+    @classmethod
+    def values(cls):
+        return [member.value for member in cls]   
+
+# TODO: initiator_id字段可能需要删除
 class OrderParticipant(db.Model):
-    """订单参与者关联模型"""
+    """
+    订单参与者关联表
+    +------------------+---------------------+------+-----+-------------------+-----------------------------+
+    | Field            | Type                | Null | Key | Default           | Comment                     |
+    +------------------+---------------------+------+-----+-------------------+-----------------------------+
+    | participator_id  | Integer             | NO   | PRI | NULL              | 参与者ID(复合主键1)         |
+    | order_id         | Integer             | NO   | PRI | NULL              | 订单ID(复合主键2)           |
+    | initiator_id     | Integer             | YES  | MUL | NULL              | 发起人ID                    |
+    | identity         | Enum('driver',      | NO   |     | NULL              | 参与者身份(driver/passenger)|
+    | join_time        | DateTime            | NO   |     | CURRENT_TIMESTAMP | 加入时间                    |
+    +------------------+---------------------+------+-----+-------------------+-----------------------------+
+    """
     __tablename__ = 'order_participants'
     __table_args__ = {'comment': '订单参与者表'}
 
@@ -15,7 +31,8 @@ class OrderParticipant(db.Model):
     participator_id = db.Column(db.Integer, db.ForeignKey('user.user_id', ondelete='CASCADE'), primary_key=True, comment='参与者ID')
     order_id = db.Column(db.Integer, db.ForeignKey('orders.order_id', ondelete='CASCADE'), primary_key=True, comment='订单ID')
     initiator_id = db.Column(db.Integer, db.ForeignKey('user.user_id', ondelete='CASCADE'), nullable=True, comment='发起人ID')
-    identity = db.Column(db.Enum('driver', 'passenger', name='order_type_enum'), nullable=False, comment='身份(driver/passenger)')
+    identity = db.Column(db.Enum(*ParticipantIdentity.values(), name='order_type_enum'), nullable=False, comment='身份(driver/passenger)')
+    # join_time = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, comment='加入时间')
 
     # 关系定义
     participator = db.relationship('User', foreign_keys=[participator_id], back_populates='participated_orders')

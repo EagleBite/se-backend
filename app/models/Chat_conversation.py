@@ -12,6 +12,7 @@ class ConversationType(Enum):
     def values(cls):
         return [member.value for member in cls]
 
+# TODO: 增加order_id字段
 class Conversation(db.Model):
     """
     聊天会话
@@ -22,6 +23,7 @@ class Conversation(db.Model):
     | type       | Enum             | NO   |     | NULL    | 会话类型          |
     | title      | String(100)      | YES  |     | NULL    | 会话标题          |
     | avatar     | String(255)      | YES  |     | NULL    | 会话头像URL       |
+    | order_id   | Integer          | YES  |     | NULL    | 关联订单ID        |
     | created_at | DateTime         | YES  |     | now()   | 创建时间          |
     +------------+------------------+------+-----+---------+------------------+
     """
@@ -32,11 +34,13 @@ class Conversation(db.Model):
     type = db.Column(db.Enum(*ConversationType.values(), name='conversation_type_enum'), nullable=False, comment='会话类型')
     title = db.Column(db.String(100), nullable=True, comment='会话标题')
     avatar = db.Column(db.String(255), nullable=True, comment='会话头像URL')
+    order_id = db.Column(db.Integer, db.ForeignKey('orders.order_id'), nullable=True, comment='关联订单ID')
     created_at = db.Column(db.DateTime, default=db.func.now(), comment='创建时间')
 
     # 关联关系
     messages = db.relationship('Message', back_populates='conversation', cascade='all, delete-orphan')
     participants = db.relationship('ConversationParticipant', back_populates='conversation', cascade='all, delete-orphan')
+    order = db.relationship('Order', back_populates='order_conversations')
 
     def get_display_title(self, current_user_id):
         """获取适合当前用户显示的会话标题"""
