@@ -40,6 +40,11 @@ class User(db.Model):
     def password(self):
         raise AttributeError('password is not a readable attribute')
     
+    @property
+    def is_manager(self):
+        """判断用户是否是管理员的属性"""
+        return self.manager_role is not None
+    
     @password.setter
     def password(self, password):
         self.password_hash = generate_password_hash(password)

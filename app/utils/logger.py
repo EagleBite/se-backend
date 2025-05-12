@@ -1,4 +1,4 @@
-import os, logging, json
+import os, logging, json, uuid
 from logging import addLevelName
 from logging.handlers import RotatingFileHandler
 from flask import current_app, request, jsonify
@@ -231,7 +231,7 @@ def log_request_response(logger: Optional[logging.Logger] = None,
             logger.error(f"Failed to log response: {str(e)}", exc_info=True)
 
 def log_requests(logger: Optional[logging.Logger] = None,
-                 log_level: int = logging.DEBUG,
+                 log_level: int = logging.INFO,
                  max_body_length: int = 1000,
                  sensitive_fields: tuple = ('password', 'access_token', 'refresh_token')):
     """
@@ -246,6 +246,7 @@ def log_requests(logger: Optional[logging.Logger] = None,
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
+
             # 记录请求
             log_request_response(logger=logger, log_level=log_level, 
                                max_body_length=max_body_length,
@@ -253,7 +254,7 @@ def log_requests(logger: Optional[logging.Logger] = None,
             
             # 执行视图函数
             response = f(*args, **kwargs)
-            
+
             # 记录响应
             request.__dict__['response'] = response
             log_request_response(logger=logger, log_level=log_level,

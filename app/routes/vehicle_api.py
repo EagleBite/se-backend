@@ -1,49 +1,77 @@
 from flask import Blueprint, jsonify, request
 from ..models import User, Car
 from ..models.association import user_car
-from ..utils.logger import get_logger
+from ..utils.logger import get_logger, log_requests
 from ..extensions import db
+from ..utils.Response import ApiResponse
+from flask_jwt_extended import jwt_required, get_jwt_identity
 
 vehicle_bp = Blueprint('vehicle_api', __name__)
 
-@vehicle_bp.route('/<int:user_id>', methods=['GET'])
-def get_user_cars(user_id):
-    """获取用户车辆列表"""
+@vehicle_bp.route('', methods=['GET'])
+@jwt_required()
+@log_requests()
+def get_user_cars():
+    """
+    获取当前用户的车辆列表
+    """
     logger = get_logger(__name__)
-    user = User.query.get(user_id)
-    if not user:
-        return jsonify({"code": 404, "message": "用户不存在"}), 404
-    try:  
+    current_user_id = get_jwt_identity()
+    logger.info(f"开始获取用户 {current_user_id} 的车辆列表")
+
+    try:
+        # 验证用户存在
+        user = User.query.get(current_user_id)
+        if not user:
+            logger.warning(f"用户不存在: {current_user_id}")
+            return ApiResponse.error("用户不存在", code=404).to_json_response(200)
+
+        # 获取车辆列表
         cars = [{
             "car_id": car.car_id,
             "plate_number": car.license,
             "brand_model": car.car_type,
             "color": car.color,
-            "seats": car.seat_num
+            "seats": car.seat_num,
         } for car in user.cars]
-        
-        return jsonify({
-            "code": 200, 
-            "message": "服务器错误",
-            "data":cars
-        }), 200
-        
-    except Exception as e:
-        logger.error(f"获取用户车辆失败: {e}")
-        return jsonify({"code": 500, "message": "服务器错误"}), 500
 
-@vehicle_bp.route('/<int:user_id>', methods=['POST'])
-def add_user_car(user_id):
-    """添加用户车辆（增强校验版）"""
+        logger.success(f"成功获取用户 {current_user_id} 的 {len(cars)} 辆车辆")
+        return ApiResponse.success(
+            "获取车辆列表成功",
+            data={
+                "count": len(cars),
+                "vehicles": cars
+            }
+        ).to_json_response(200)
+
+    except Exception as e:
+        logger.error(f"获取用户车辆失败: {str(e)}")
+        return ApiResponse.error(
+            f"获取车辆列表失败: {str(e)}",
+            code=500
+        ).to_json_response(200)
+
+@vehicle_bp.route('/add', methods=['POST'])
+@jwt_required()
+@log_requests()
+def add_user_car():
+    """添加用户车辆"""
     logger = get_logger(__name__)
+    current_user_id = get_jwt_identity()
     data = request.get_json()
     
     # 参数校验
     required_fields = ['number', 'color', 'model', 'seats']
     if not data or not all(k in data for k in required_fields):
-        return jsonify({"code": 400, "message": "缺少必要参数"}), 400
+        logger.warning("缺少必要参数")
+        return ApiResponse.error("缺少必要参数", code=400).to_json_response(200)
     
     try:
+        user = User.query.get(current_user_id)
+        if not user:
+            logger.warning(f"用户不存在: {current_user_id}")
+            return ApiResponse.error("用户不存在", code=404).to_json_response(200)
+
         # 检查车牌是否已存在
         existing_car = Car.query.filter_by(license=data['number']).first()
         
@@ -56,42 +84,41 @@ def add_user_car(user_id):
             )
             
             if not is_info_match:
-                return jsonify({
-                    "code": 200,
-                    "message": "车辆信息不匹配",
-                    "data": {
+                logger.warning(f"车辆信息不匹配: {data['number']}")
+                return ApiResponse.success(
+                    "车辆信息不匹配",
+                    data={
                         "existing_info": {
                             "color": existing_car.color,
                             "model": existing_car.car_type,
                             "seats": existing_car.seat_num
                         }
                     }
-                }), 200
+                ).to_json_response(200)
             
             # 信息一致，检查是否已关联
-            user = User.query.get(user_id)
             if existing_car in user.cars:
-                return jsonify({
-                    "code": 200,
-                    "message": "车辆已关联",
-                    "data": {
+                logger.info(f"车辆已关联: {data['number']}")
+                return ApiResponse.success(
+                    "车辆已关联",
+                    data={
                         "car_id": existing_car.car_id,
                         "plate_number": existing_car.license
                     }
-                }), 200
+                ).to_json_response(200)
                 
             # 添加关联关系
             user.cars.append(existing_car)
             db.session.commit()
-            
-            return jsonify({
-                "code": 200,
-                "message": "关联成功",
-                "data": {
+
+            logger.success(f"成功关联已有车辆: {data['number']}")
+            return ApiResponse.success(
+                "关联成功",
+                data={
                     "car_id": existing_car.car_id,
                     "plate_number": existing_car.license
                 }
-            }), 200
+            ).to_json_response(200)
             
         # 全新车辆
         new_car = Car(
@@ -101,26 +128,28 @@ def add_user_car(user_id):
             seat_num=data['seats']
         )
         db.session.add(new_car)
-        user = User.query.get(user_id)
         user.cars.append(new_car)
         db.session.commit()
-        
-        return jsonify({
-            "code": 200,
-            "message": "添加成功",
-            "data": {
+
+        logger.success(f"成功添加新车辆: {data['number']}")
+        return ApiResponse.success(
+            "添加成功",
+            data={
                 "car_id": new_car.car_id,
                 "plate_number": new_car.license,
                 "brand_model": new_car.car_type,
                 "color": new_car.color,
-                "seats": new_car.seat_num
+                "seats": new_car.seat_num,
             }
-        }), 200
+        ).to_json_response(200)
         
     except Exception as e:
         db.session.rollback()
-        logger.error(f"添加车辆失败: {e}")
-        return jsonify({"code": 500, "message": "服务器错误"}), 500
+        logger.error(f"添加车辆失败: {str(e)}")
+        return ApiResponse.error(
+            f"添加车辆失败: {str(e)}",
+            code=500
+        ).to_json_response(200)
 
 @vehicle_bp.route('/<int:user_id>/<string:old_number>', methods=['PUT'])
 def update_user_car(user_id, old_number):
@@ -216,6 +245,7 @@ def update_user_car(user_id, old_number):
         db.session.rollback()
         logger.error(f"更新车辆失败: {e}")
         return jsonify({"code": 500, "message": "服务器错误"}), 500
+    
 @vehicle_bp.route('/<int:user_id>/<string:number>', methods=['DELETE'])
 def unbind_user_car(user_id, number):
     """解绑用户车辆"""

@@ -6,16 +6,26 @@ from ..utils.logger import get_logger
 
 class OrderStatus(Enum):
     """订单状态枚举"""
-    PENDING = 'pending'
-    COMPLETED = 'completed'
-    TO_REVIEW = 'to-review'
-    NOT_STARTED = 'not-started'
-    IN_PROGRESS = 'in-progress'
+    PENDING = 'pending'          # 待审核
+    COMPLETED = 'completed'      # 已完成
+    REJECTED = 'rejected'        # 已拒绝
+    NOT_STARTED = 'not-started'  # 未开始
+    IN_PROGRESS = 'in-progress'  # 进行中
+    TO_PAY = 'to-pay'            # 待付款
+    TO_REVIEW = 'to-review'      # 待评价
+    
+    @classmethod
+    def values(cls):
+        return [member.value for member in cls]   
 
 class OrderType(Enum):
     """订单类型枚举"""
     DRIVER = 'driver'
     PASSENGER = 'passenger'
+
+    @classmethod
+    def values(cls):
+        return [member.value for member in cls]   
 
 class OrderRate(Enum):
     """评分枚举"""
@@ -26,8 +36,31 @@ class OrderRate(Enum):
     FOUR = '4'
     FIVE = '5'
 
+    @classmethod
+    def values(cls):
+        return [member.value for member in cls]   
+
 class Order(db.Model):
-    """拼车订单模型"""
+    """
+    拼车订单表
+    +---------------------+------------------------+------+-----+---------------------+-----------------------------+
+    | Field               | Type                   | Null | Key | Default             | Comment                     |
+    +---------------------+------------------------+------+-----+---------------------+-----------------------------+
+    | order_id            | Integer                | NO   | PRI | auto_increment      | 订单ID                      |
+    | initiator_id        | Integer                | NO   | MUL | NULL                | 发起人ID                    |
+    | start_loc           | String(100)            | NO   | MUL | NULL                | 出发地(建立索引)            |
+    | dest_loc            | String(100)            | NO   |     | NULL                | 目的地                      |
+    | start_time          | DateTime               | NO   |     | CURRENT_TIMESTAMP   | 出发时间                    |
+    | price               | Numeric(10,2)          | NO   |     | NULL                | 价格(精度:2位小数)          |
+    | status              | Enum                   | NO   | MUL | 'not-started'       | 订单状态(建立索引)          |
+    | order_type          | Enum                   | NO   |     | NULL                | 订单类型(driver/passenger)  |
+    | car_type            | String(50)             | YES  |     | NULL                | 车型要求                    |
+    | travel_partner_num  | Integer                | YES  |     | NULL                | 同行人数(乘客订单)          |
+    | spare_seat_num      | Integer                | YES  |     | NULL                | 剩余座位(司机订单)          |
+    | rate                | Enum                   | YES  |     | NULL                | 评分(0-5)                   |
+    | reject_reason       | String(200)            | YES  |     | NULL                | 拒绝原因                    |
+    +---------------------+------------------------+------+-----+---------------------+-----------------------------+
+    """
     __tablename__ = 'orders'
     __table_args__ = {'comment': '拼车订单表'}
     
@@ -37,36 +70,19 @@ class Order(db.Model):
     dest_loc = db.Column(db.String(100), nullable=False, comment='目的地')
     start_time = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, comment='出发时间')
     price = db.Column(db.Numeric(10, 2), nullable=False, comment='价格')
-    
-    # pending-待审核；completed：已完成；rejected：已拒绝；not-started：未开始；in-progress：进行中；to-pay：待付款；to-review：待评价
-    status = db.Column(db.Enum(
-        'pending', 'completed', 'rejected', 'not-started', 'in-progress', 'to-pay','to-review',
-        name='order_status_enum'
-    ), default='not-started', nullable=False, index=True, comment='订单状态')
-    
-    order_type = db.Column(db.Enum(
-        'driver', 'passenger',
-        name='order_type_enum'
-    ), nullable=False, comment='订单类型')
-    
+    status = db.Column(db.Enum(*OrderStatus.values(), name='order_status_enum'), default=OrderStatus.NOT_STARTED.value ,nullable=False, index=True, comment='订单状态')
+    order_type = db.Column(db.Enum(*OrderType.values(), name='order_type_enum'), nullable=False, comment='订单类型')
     car_type = db.Column(db.String(50), nullable=True, comment='车型要求')
     travel_partner_num = db.Column(db.Integer, nullable=True, comment='同行人数(乘客订单)')
     spare_seat_num = db.Column(db.Integer, nullable=True, comment='剩余座位(司机订单)')
-    
-    rate = db.Column(db.Enum(
-        '0', '1', '2', '3', '4', '5',
-        name='order_rate_enum'
-    ), nullable=True, comment='评分')
+    rate = db.Column(db.Enum(*OrderRate.values(), name='order_rate_enum'), nullable=True, comment='评分')
+    reject_reason = db.Column(db.String(200), nullable=True, comment='拒绝原因')
 
-    # 订单发起者与订单的关系
-    initiator = db.relationship('User', back_populates='initiated_orders')
-    # 订单参与者与订单的关系
-    participants = db.relationship(
-        'OrderParticipant',
-        back_populates='order',
-        cascade='all, delete-orphan'
-    )
-    reject_reason = db.Column(db.String(200), nullable=True, comment='拒绝原因') # 拒绝原因
+    # 关联关系
+    initiator = db.relationship('User', back_populates='initiated_orders')                                   # 订单发起者
+    participants = db.relationship('OrderParticipant', back_populates='order', cascade='all, delete-orphan') # 订单参与者
+    messages = db.relationship('Message', back_populates='order')                                            # 发送该订单邀请的消息
+    
     def __repr__(self):
         return f'<Order {self.order_id}: {self.start_loc}→{self.dest_loc}>'
     

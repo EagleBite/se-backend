@@ -28,11 +28,6 @@ def socketio_jwt_required(fn):
             token = None
             sid = request.sid  # 当前Socket.IO会话ID
 
-            logger.debug(f"开始认证处理 [sid: {sid}]")
-            logger.debug(f"请求头: {dict(request.headers)}")
-            logger.debug(f"查询参数: {request.args}")
-            logger.debug(f"Socket.IO auth: {getattr(request, 'auth', None)}")
-
             # 方式1: 从请求头获取
             auth_header = request.headers.get('Authorization')
             if auth_header and auth_header.startswith('Bearer '):
@@ -68,7 +63,7 @@ def socketio_jwt_required(fn):
                 'sid': sid
             }
 
-            logger.info(f"用户认证成功 [user_id: {decoded['sub']}, sid: {sid}]")
+            logger.success(f"用户认证成功 [user_id: {decoded['sub']}, sid: {sid}]")
             return fn(*args, **kwargs)
         
         except ExpiredSignatureError:
@@ -95,7 +90,7 @@ def handle_connect(auth=None):
     """处理连接事件"""
     logger = get_logger(__name__)
     
-    logger.info(f"用户 {g.socketio_user['id']} 连接成功, socket_id: {request.sid}")
+    logger.success(f"用户 {g.socketio_user['id']} 连接成功, socket_id: {request.sid}")
 
     user_id = g.socketio_user['id']
 
@@ -109,7 +104,7 @@ def handle_disconnect():
     user_id = next((k for k,v in online_users.items() if v == request.sid), None)
     if user_id:
         online_users.pop(user_id, None)
-        logger.info(f"用户 {user_id} 下线")
+        logger.success(f"用户 {user_id} 下线")
 
 @socketio.on('join_conversation')
 @socketio_jwt_required

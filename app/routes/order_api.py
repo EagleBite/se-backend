@@ -225,7 +225,7 @@ def get_calendar_orders(user_id):
 @jwt_required()
 @log_requests()
 def get_user_trips():
-    """获取用户最近的行程记录"""
+    ""r"获取用户最近的行程记录"""
     logger = get_logger(__name__)
 
     current_user_id = get_jwt_identity()

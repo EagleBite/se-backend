@@ -91,7 +91,6 @@ def register_commands(app):
                 logger.error(f"删除表失败: {str(e)}", exc_info=True)
                 raise
 
-
     @app.cli.command("list-routes")
     def list_routes():
         """列出所有API端点及其注释和HTTP方法."""

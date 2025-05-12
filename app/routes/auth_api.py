@@ -9,54 +9,35 @@ import base64
 auth_bp = Blueprint('auth_api', __name__)
 
 @auth_bp.route('/register', methods=['POST'])
+@log_requests()
 def register():
     """用户注册"""
     logger = get_logger(__name__)
     data = request.get_json()
-
-    # 检查请求体是否为空
-    if not data:
-        return jsonify({"code": 400, "message": "请求体不能为空"}), 400
-    
-    logger.debug(f"注册请求数据: {data}")
    
-    # 检查用户名和手机号是否已存在
+    # 检查用户名、手机号、身份证号是否已存在
     if User.query.filter_by(username=data['username']).first():
-        logger.error("用户名已被注册")
-        return jsonify({
-            "code": 400,
-            "message": "用户名已被注册"
-        }), 400
+        response = ApiResponse.error(message="用户名已经被注册", code=400)
+        return response.to_json_response(400)
 
     if User.query.filter_by(telephone=data['telephone']).first():
-        logger.error("手机号已被注册")
-        return jsonify({
-            "code": 400,
-            "message": "手机号已被注册"
-        }), 400
+        response = ApiResponse.error(message="手机号已被注册", code=400)
+        return response.to_json_response(400)
     
     if User.query.filter_by(identity_id=data['identity_id']).first():
-        logger.error("身份证号已被注册")
-        return jsonify({
-            "code": 400,
-            "message": "身份证号已被注册"
-        }), 400
+        response = ApiResponse.error(message="身份证号已被注册", code=400)
+        return response.to_json_response(400)
     
     user, error = User.create_user(data)
     
     if error:
-        logger.error(f"用户注册失败: {error}")
-        return jsonify({"error": "用户注册失败"}), 400
+        response = ApiResponse.error(message=f"用户注册失败: {error}", code=400)
+        return response.to_json_response(400)
     
-    logger.info(f"用户注册成功: {user.user_id, user.username}")
+    logger.success(f"用户注册成功: {user.user_id, user.username}")
 
-    return jsonify({
-            "code" : 200,
-            "message": "用户注册成功",
-            "data": {
-                "userId": user.user_id
-            }
-        }), 200
+    response = ApiResponse.success(message="登录成功", data={"userId": user.user_id})
+    return response.to_json_response()
 
 @auth_bp.route('/login', methods=['POST'])
 @log_requests()
@@ -103,7 +84,8 @@ def login():
         "username": user.username,
         "gender": user.gender,
         "age": user.calculate_age(user.identity_id),
-        "avatar": avatar_data or current_app.config['DEFAULT_AVATAR_URL']
+        "avatar": avatar_data or current_app.config['DEFAULT_AVATAR_URL'],
+        "is_manager": user.is_manager
     }
 
     return ApiResponse.success(

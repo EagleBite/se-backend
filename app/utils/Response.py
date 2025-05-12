@@ -2,7 +2,28 @@ from flask import jsonify
 from typing import Optional, Dict, Any
 
 class ApiResponse:
-    """统一API响应格式"""
+    """统一API响应格式
+    
+    使用方法：
+        # 1. 成功响应
+        response = ApiResponse.success(message="操作成功", data={"key": "value"})
+        return response.to_json_response()
+        
+        # 2. 错误响应
+        response = ApiResponse.error(message="参数错误", code=400)
+        return response.to_json_response(400)
+        
+        # 链式调用
+        response = (ApiResponse()
+                  .set_code(200)
+                  .set_message("成功")
+                  .set_data({"result": True}))
+        return response.to_json_response()
+        
+        # 设置错误
+        response = ApiResponse().set_error("未找到资源", 404)
+        return response.to_json_response(404)
+    """
     def __init__(self, code: int, message: str, data: Optional[Dict[str, Any]] = None):
         self.code = code
         self.message = message
