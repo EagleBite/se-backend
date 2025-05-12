@@ -212,3 +212,143 @@ def get_messages(conversation_id):
             "获取消息失败",
             error_code=500
         ).to_json_response(500)
+    
+# chat_api.py 新增路由
+@chat_bp.route('/conversations/private', methods=['POST'])
+@jwt_required()
+@log_requests()
+def create_private_conversation():
+    """创建私聊会话"""
+    logger = get_logger(__name__)
+    current_user_id = get_jwt_identity()
+    
+    try:
+        data = request.get_json()
+        # 参数校验
+        required_fields = ['target_user_id', 'order_id']
+        if not all(field in data for field in required_fields):
+            return ApiResponse.error("缺少必要参数: target_user_id 或 order_id").to_json_response(400)
+
+        target_user_id = data['target_user_id']
+        order_id = data['order_id']
+
+        # 验证订单有效性
+        order = Order.query.get(order_id)
+        if not order or order.initiator_id != target_user_id:
+            return ApiResponse.error("无效的订单ID").to_json_response(404)
+
+        # 获取或创建会话
+        conv = get_or_create_private_conversation(current_user_id, target_user_id)
+        
+        # 关联订单与会话
+        conv.trip_id = order_id
+        db.session.commit()
+
+        # 获取对方用户信息
+        target_user = User.query.get(target_user_id)
+        participants_info = [{
+            'user_id': target_user.user_id,
+            'username': target_user.username,
+            'avatar': base64.b64encode(target_user.user_avatar).decode('utf-8') 
+                      if target_user.user_avatar else None,
+            'realname': target_user.realname
+        }]
+
+        # 触发Socket事件
+        socketio.emit('conversation_created', {
+            'conversation_id': conv.id,
+            'initiator_id': current_user_id,
+            'target_user_id': target_user_id,
+            'order_id': order_id,
+            'created_at': datetime.utcnow().isoformat()
+        }, room=str(target_user_id))
+
+        logger.success(f"私聊会话创建成功: {conv.id}")
+        return ApiResponse.success(
+            "会话创建成功",
+            data={
+                'conversation_id': conv.id,
+                'type': 'private',
+                'avatar': base64.b64encode(target_user.user_avatar).decode('utf-8') 
+                      if target_user.user_avatar else None,
+                'title': target_user.realname or target_user.username,
+                'created_at': conv.created_at.isoformat(),
+                'participants': participants_info
+            }
+        ).to_json_response(200)
+
+    except Exception as e:
+        logger.error(f"创建私聊会话失败: {str(e)}", exc_info=True)
+        return ApiResponse.error("服务器内部错误").to_json_response(500)
+
+@chat_bp.route('/messages', methods=['POST'])
+@jwt_required()
+@log_requests()
+def create_message():
+    """发送初始消息"""
+    logger = get_logger(__name__)
+    current_user_id = get_jwt_identity()
+
+    try:
+        data = request.get_json()
+        # 参数校验
+        required_fields = ['conversation_id', 'order_id', 'content']
+        if not all(field in data for field in required_fields):
+            return ApiResponse.error("缺少必要参数").to_json_response(400)
+
+        # 验证会话权限
+        participant = Participant.query.filter_by(
+            conversation_id=data['conversation_id'],
+            user_id=current_user_id
+        ).first()
+        if not participant:
+            return ApiResponse.error("无权限发送消息").to_json_response(403)
+
+        # 创建消息记录
+        new_message = Message(
+            conversation_id=data['conversation_id'],
+            sender_id=current_user_id,
+            content=data['content'],
+            message_type='invitation',
+            is_read=False
+        )
+        db.session.add(new_message)
+        db.session.commit()
+
+        # 关联订单
+        if data['order_id']:
+            order = Order.query.get(data['order_id'])
+            if order:
+                new_message.special_type = 'order_invitation'
+                new_message.order_id = order.order_id
+                db.session.commit()
+
+        # 构造响应数据
+        message_data = {
+            'mess_id': new_message.id,
+            'content': new_message.content,
+            'created_at': new_message.created_at.isoformat(),
+            'sender': {
+                'user_id': current_user_id,
+                'username': current_user.username,
+                'avatar': base64.b64encode(current_user.user_avatar).decode('utf-8') 
+                          if current_user.user_avatar else None
+            },
+            'order_id': data['order_id']
+        }
+
+        # 触发Socket事件
+        socketio.emit('message_sent', {
+            'conversation_id': data['conversation_id'],
+            **message_data
+        }, room=str(data['conversation_id']))
+
+        logger.success(f"初始消息发送成功: {new_message.id}")
+        return ApiResponse.success(
+            "消息发送成功",
+            data=message_data
+        ).to_json_response(200)
+
+    except Exception as e:
+        logger.error(f"消息发送失败: {str(e)}", exc_info=True)
+        return ApiResponse.error("消息发送失败").to_json_response(500)

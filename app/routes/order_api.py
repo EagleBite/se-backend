@@ -482,30 +482,6 @@ def reject_order(order_id):
             "code": 500,
             "error": "拒绝订单失败"
         }), 500
-    
-def map_status_to_frontend(db_status):
-    """将数据库状态枚举值映射为前端显示的中文字符串"""
-    mapping = {
-        'PENDING': '处理中',
-        'COMPLETED': '已完成',
-        'TO_REVIEW': '待评价',
-        'NOT_STARTED': '未开始', # 初始状态
-        'IN_PROGRESS': '进行中',
-        'REJECTED': '已拒绝'
-    }
-    return mapping.get(db_status, db_status)
-
-def format_datetime(dt):
-    """将 datetime 对象格式化为前端适用的字符串"""
-    if isinstance(dt, datetime):
-        return dt.strftime('%Y-%m-%d %H:%M')
-    return str(dt)
-
-def decimal_to_float(d):
-    """将 Decimal 类型转换为 float 类型，用于 JSON 序列化"""
-    if isinstance(d, Decimal):
-        return float(d)
-    return d
 
 @order_bp.route('/<int:order_id>/rate', methods=['POST'])
 def rate_trip(order_id):
@@ -623,4 +599,121 @@ def mark_order_as_paid(order_id):
     except Exception as e:
         db.session.rollback()
         logger.error(f"标记订单 {order_id} 为已支付时出错: {str(e)}")
-        return jsonify({"code": 500, "error": "标记订单为已支付失败"}), 500
+        return jsonify({"code": 500, "error": "标记订单为已支付失败"}), 500from flask import Blueprint, jsonify, request, current_app
+
+@order_bp.route('/<int:order_id>', methods=['DELETE'])
+def delete_order(order_id):
+    """
+    删除订单（仅限未开始状态）
+    """
+    logger = get_logger(__name__)
+    try:
+        # 获取订单
+        order = Order.query.get(order_id)
+        if not order:
+            return jsonify({"code": 404, "message": "订单不存在"}), 404
+            
+        # 检查订单状态
+        if order.status != 'not-started':
+            return jsonify({
+                "code": 403,
+                "message": "只有未开始状态的订单可以删除"
+            }), 403
+
+        # 删除订单
+        db.session.delete(order)
+        db.session.commit()
+        
+        return jsonify({"code": 200, "message": "订单已删除"}), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"删除订单失败: {str(e)}")
+        return jsonify({"code": 500, "message": "服务器错误"}), 500
+    
+@order_bp.route('/not-started', methods=['GET'])
+def get_not_started_orders():
+    """
+    获取所有状态为not-started的订单列表
+    """
+    logger = get_logger(__name__)
+    
+    try:
+        # 获取查询参数
+        identity = request.args.get('identity', 'passenger')  # 默认乘客身份
+        keyword = request.args.get('keyword', '').strip()
+
+        # 参数验证
+        if identity not in ['driver', 'passenger']:
+            return jsonify({
+                "code": 400,
+                "error": "无效的身份类型，只能是driver或passenger"
+            }), 400
+
+        # 构建基础查询
+        base_query = Order.query.filter(
+            and_(
+                Order.status == 'not-started',
+                Order.order_type == identity
+            )
+        ).options(
+            db.joinedload(Order.initiator)
+        )
+
+        # 添加关键词过滤
+        if keyword:
+            search_pattern = f"%{keyword}%"
+            base_query = base_query.filter(
+                or_(
+                    Order.start_loc.ilike(search_pattern),
+                    Order.dest_loc.ilike(search_pattern)
+                )
+            )
+
+        # 执行查询并排序（按出发时间正序）
+        orders = base_query.order_by(Order.start_time.asc()).all()
+
+        # 构造响应数据
+        orders_data = []
+        for order in orders:
+            # 处理用户头像
+            avatar_url = current_app.config['DEFAULT_AVATAR_URL']
+            if order.initiator.user_avatar:
+                if isinstance(order.initiator.user_avatar, bytes):
+                    avatar_url = f"data:image/jpeg;base64,{base64.b64encode(order.initiator.user_avatar).decode('utf-8')}"
+                else:
+                    avatar_url = order.initiator.user_avatar
+
+            # 构造订单数据
+            order_data = {
+                "order_id": order.order_id,
+                "initiator_id": order.initiator_id,
+                "start_loc": order.start_loc,
+                "dest_loc": order.dest_loc,
+                "start_time": order.start_time.isoformat(),
+                "price": float(order.price),
+                "order_type": order.order_type,
+                "car_type": order.car_type,
+                "travel_partner_num": order.travel_partner_num,
+                "spare_seat_num": order.spare_seat_num,
+                "user": {
+                    "user_id": order.initiator.user_id,
+                    "username": order.initiator.username,
+                    "user_avatar": avatar_url,
+                    "order_count": len(order.initiator.initiated_orders)
+                }
+            }
+            orders_data.append(order_data)
+
+        return jsonify({
+            "code": 200,
+            "message": "success",
+            "data": orders_data
+        }), 200
+
+    except Exception as e:
+        logger.error(f"获取未开始订单失败: {str(e)}")
+        return jsonify({
+            "code": 500,
+            "error": "服务器内部错误，获取订单失败"
+        }), 500
