@@ -6,6 +6,7 @@ from flask_jwt_extended import jwt_required, current_user, get_jwt_identity
 from ..extensions import db, socketio
 from ..models import User, Conversation, Message, Order
 from ..models import ConversationParticipant as Participant
+from ..models.Chat_messgae import MessageType
 from ..utils.logger import get_logger, log_requests
 from ..utils.Response import ApiResponse
 
@@ -131,9 +132,8 @@ def get_conversations():
 @jwt_required()
 @log_requests()
 def get_messages(conversation_id):
-    """获取指定会话的历史消息（分页）"""
+    """获取指定会话的历史消息"""
     logger = get_logger(__name__)
-
     current_user_id = get_jwt_identity()
     logger.info(f"获取会话 {conversation_id} 的消息记录")
 
@@ -147,11 +147,10 @@ def get_messages(conversation_id):
         if not participant:
             return ApiResponse.error(
                 "您没有权限访问此会话",
-                error_code=403
+                code=403
             ).to_json_response(403)
         
         # 获取查询参数
-        limit = request.args.get('limit', default=50, type=int)
         before = request.args.get('before')
         before_time = datetime.fromisoformat(before) if before else None
 
@@ -167,7 +166,7 @@ def get_messages(conversation_id):
             query = query.filter(Message.created_at < before_time)
 
         # 执行查询
-        messages = query.limit(limit).all()
+        messages = query.all()
 
         # 更新最后读取消息ID
         if messages:
@@ -178,7 +177,7 @@ def get_messages(conversation_id):
         # 格式化响应数据
         messages_data = []
         for msg in messages:
-            messages_data.append({
+            message_data = {
                 'message_id': msg.id,
                 'content': msg.content,
                 'type': msg.message_type,
@@ -190,7 +189,31 @@ def get_messages(conversation_id):
                               if msg.sender.user_avatar else None,
                     'realname': msg.sender.realname
                 }
-            })
+            }
+
+            # 如果是申请相关的消息，加入订单信息
+            if msg.message_type in [MessageType.APPLY_JOIN.value, MessageType.APPLY_JOIN_ACCEPT.value, MessageType.APPLY_JOIN_REJECT.value]:
+                # 查找相关订单
+                order = Order.query.filter_by(
+                    order_id=msg.order_id  # 假设消息中有order_id字段
+                ).first()
+
+                if order:
+                    message_data['order_info'] = {
+                        'order_id': order.order_id,
+                        'initiator_id': order.initiator_id,
+                        'start_loc': order.start_loc,
+                        'dest_loc': order.dest_loc,
+                        'start_time': order.start_time.isoformat(),
+                        'price': str(order.price),
+                        'status': order.status,
+                        'order_type': order.order_type,
+                        'car_type': order.car_type,
+                        'travel_partner_num': order.travel_partner_num,
+                        'spare_seat_num': order.spare_seat_num
+                    }
+
+            messages_data.append(message_data)
 
         logger.success(f"成功获取会话 {conversation_id} 的消息记录")
         return ApiResponse.success(
@@ -202,13 +225,13 @@ def get_messages(conversation_id):
         logger.error(f"时间参数格式错误: {str(e)}")
         return ApiResponse.error(
             "时间参数格式不正确，请使用ISO格式(如 2023-07-20T10:30:00)",
-            error_code=400
+            code=400
         ).to_json_response(400)
     except Exception as e:
         logger.error(f"获取消息失败: {str(e)}", exc_info=True)
         return ApiResponse.error(
             "获取消息失败",
-            error_code=500
+            code=500
         ).to_json_response(500)
     
 # chat_api.py 新增路由

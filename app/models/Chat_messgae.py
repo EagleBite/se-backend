@@ -4,10 +4,16 @@ from .order import Order
 
 class MessageType(Enum):
     """消息类型枚举"""
-    TEXT = 'text'               # 文本信息
-    IMAGE = 'image'             # 图片信息
-    FILE = 'file'               # 文件信息   
-    INVITATION = 'invitation'   # 拼车邀请信息
+    TEXT = 'text'                   # 文本信息
+    IMAGE = 'image'                 # 图片信息
+    FILE = 'file'                   # 文件信息   
+    INVITATION = 'invitation'       # 拼车邀请信息
+    APPLY_JOIN = 'apply_join'                     # 加入申请（乘客）
+    APPLY_JOIN_ACCEPT = 'apply_join_accept'       # 加入申请（乘客） -- 同意
+    APPLY_JOIN_REJECT = 'apply_join_reject'       # 加入申请（乘客） -- 拒绝
+    APPLY_ORDER = 'apply_order'                   # 接单申请（司机）
+    APPLY_ORDER_ACCEPT = 'apply_order_accept'     # 接单申请（司机） -- 同意
+    APPLY_ORDER_REJECT = 'apply_order_reject'     # 接单申请（司机） -- 拒绝
 
     @classmethod
     def values(cls):

@@ -4,10 +4,11 @@ from sqlalchemy import and_, or_
 from decimal import Decimal
 from ..extensions import db
 import base64
-from ..models import Order, OrderParticipant, User, Car, Conversation, ConversationParticipant
+from ..models import Order, OrderParticipant, User, Car, Conversation, ConversationParticipant, Message
 from ..models.order import OrderStatus, OrderType
 from ..models.order_participant import ParticipantIdentity
 from ..models.Chat_conversation import ConversationType
+from ..models.Chat_messgae import MessageType
 from ..utils.logger import get_logger, log_requests
 from ..utils.Response import ApiResponse
 import json
@@ -45,8 +46,7 @@ def get_order_list():
         # 排除不合理的订单（出发时间已过且未开始的订单）
         current_time = datetime.utcnow()
         query = query.filter(
-            (Order.status == OrderStatus.IN_PROGRESS.value) |
-            (Order.status == OrderStatus.NOT_STARTED.value) |
+            Order.status.in_([OrderStatus.NOT_STARTED.value, OrderStatus.IN_PROGRESS.value]),
             (Order.start_time > current_time)
         )
 
@@ -73,12 +73,12 @@ def get_order_list():
                 'startPoint': order.start_loc,
                 'endPoint': order.dest_loc,
                 'price': float(order.price),
-                'username': user.realname or user.username,
+                'username': user.username,
                 'passengerCount': order.travel_partner_num,
                 'maxSeats': order.spare_seat_num,
                 'carType': order.car_type,
                 'orderCount': user.order_time,
-                'userAvatar': user.user_avatar,
+                'userAvatar': user.get_avatar_url(),
                 'status': order.status,
                 'startTime': order.start_time.isoformat()
             })
@@ -94,6 +94,149 @@ def get_order_list():
         return ApiResponse.error("请求参数错误", code=400).to_json_response(200)
     except Exception as e:
         logger.error(f"获取订单列表失败: {str(e)}")
+        return ApiResponse.error("服务器内部错误", code=500).to_json_response(200)
+
+@order_bp.route('/driver/available', methods=['GET'])
+@jwt_required()
+@log_requests()
+def get_driver_available_orders():
+    """获取当前用户作为司机的可用订单列表（用于发送邀请）"""
+    logger = get_logger(__name__)
+    current_user_id = get_jwt_identity()
+    logger.info(f"用户 {current_user_id} 请求获取可邀请的司机订单列表")
+
+    try:
+        # 基础查询构建（只查询当前用户创建的订单）
+        query = Order.query.options(
+            db.joinedload(Order.initiator)
+        ).filter(
+            Order.initiator_id == current_user_id  # 只查询当前用户创建的订单
+        )
+
+        # 筛选合适的订单：
+        # 1. 状态是未开始或进行中
+        # 2. 出发时间未过期
+        # 3. 订单类型是"车找人"
+        current_time = datetime.utcnow()
+        query = query.filter(
+            Order.status.in_([OrderStatus.NOT_STARTED.value, OrderStatus.IN_PROGRESS.value]),
+            Order.start_time > current_time,
+            Order.order_type == OrderType.CAR_FIND_PERSON.value,  # 只返回"车找人"类型订单
+            Order.spare_seat_num > 0  # 确保还有空位
+        )
+
+        # 执行查询
+        available_orders = query.all()
+
+        def format_order_date(dt):
+            """格式化日期显示（复用原有方法）"""
+            now = datetime.now()
+            if dt.date() == now.date():
+                return f"今天{dt.strftime('%H:%M')}"
+            elif dt.date() == (now.date() - timedelta(days=1)):
+                return f"昨天{dt.strftime('%H:%M')}"
+            return dt.strftime("%m月%d日%H:%M")
+
+        # 转换为前端格式
+        orders = []
+        for order in available_orders:
+            user = order.initiator
+            orders.append({
+                'id': order.order_id,
+                'infoType': '车找人',  # 固定为车找人类型
+                'date': format_order_date(order.start_time),
+                'startPoint': order.start_loc,
+                'endPoint': order.dest_loc,
+                'price': float(order.price),
+                'passengerCount': order.travel_partner_num,
+                'maxSeats': order.spare_seat_num,  # 剩余座位数
+                'carType': order.car_type,
+                'status': order.status,
+                'startTime': order.start_time.isoformat()
+            })
+
+        logger.success(f"用户 {current_user_id} 获取可邀请司机订单成功，共 {len(orders)} 条")
+        return ApiResponse.success(
+            "获取可邀请司机订单列表成功",
+            data=orders
+        ).to_json_response(200)
+    except ValueError as e:
+        logger.warning(f"参数错误: {str(e)}")
+        return ApiResponse.error("请求参数错误", code=400).to_json_response(200)
+    except Exception as e:
+        logger.error(f"获取可邀请司机订单列表失败: {str(e)}")
+        return ApiResponse.error("服务器内部错误", code=500).to_json_response(200)
+
+@order_bp.route('/passenger/available', methods=['GET'])
+@jwt_required()
+@log_requests()
+def get_passenger_available_orders():
+    """获取当前用户作为乘客的可加入订单列表（用于发送加入请求）"""
+    logger = get_logger(__name__)
+    current_user_id = get_jwt_identity()
+    logger.info(f"用户 {current_user_id} 请求获取可加入的乘客订单列表")
+
+    try:
+        # 基础查询构建（查询非当前用户创建的订单）
+        query = Order.query.options(
+            db.joinedload(Order.initiator)
+        ).filter(
+            Order.initiator_id != current_user_id  # 排除自己创建的订单
+        )
+
+        # 筛选合适的订单：
+        # 1. 状态是未开始或进行中
+        # 2. 出发时间未过期
+        # 3. 订单类型是"人找车"
+        # 4. 仍有空余座位（spare_seat_num > 0）
+        current_time = datetime.utcnow()
+        query = query.filter(
+            Order.status.in_([OrderStatus.NOT_STARTED.value, OrderStatus.IN_PROGRESS.value]),
+            Order.start_time > current_time,
+            Order.order_type == OrderType.PERSON_FIND_CAR.value,  # 只返回"人找车"类型
+            Order.spare_seat_num > 0  # 确保还有空位
+        )
+
+        # 执行查询
+        available_orders = query.all()
+
+        def format_order_date(dt):
+            """格式化日期显示（复用原有方法）"""
+            now = datetime.now()
+            if dt.date() == now.date():
+                return f"今天{dt.strftime('%H:%M')}"
+            elif dt.date() == (now.date() - timedelta(days=1)):
+                return f"昨天{dt.strftime('%H:%M')}"
+            return dt.strftime("%m月%d日%H:%M")
+
+        orders = []
+        for order in available_orders:
+            user = order.initiator
+            orders.append({
+                'id': order.order_id,
+                'infoType': '人找车',  # 固定为人找车类型
+                'date': format_order_date(order.start_time),
+                'startPoint': order.start_loc,
+                'endPoint': order.dest_loc,
+                'price': float(order.price),
+                'passengerCount': order.travel_partner_num,
+                'availableSeats': order.spare_seat_num, # 剩余座位
+                'maxSeats': order.spare_seat_num + order.travel_partner_num,  # 总座位数
+                'carType': order.car_type if order.car_type else '不限',
+                'status': order.status,
+                'startTime': order.start_time.isoformat(),
+            })
+
+        logger.success(f"用户 {current_user_id} 获取可加入订单成功，共 {len(orders)} 条")
+        return ApiResponse.success(
+            "获取可加入订单列表成功",
+            data=orders
+        ).to_json_response(200)
+    except ValueError as e:
+        logger.warning(f"参数错误: {str(e)}")
+        return ApiResponse.error("请求参数错误", code=400).to_json_response(200)
+    except Exception as e:
+        logger.error(f"获取可加入订单列表失败: {str(e)}")
         return ApiResponse.error("服务器内部错误", code=500).to_json_response(200)
 
 @order_bp.route('', methods=['POST'])
@@ -329,15 +472,81 @@ def get_calendar_orders(user_id):
 def get_user_trips():
     ""r"获取用户最近的行程记录"""
     logger = get_logger(__name__)
-
     current_user_id = get_jwt_identity()
     logger.info(f"获取用户 {current_user_id} 的行程记录")
     
     try:
-        # 获取查询参数，限制返回的记录数
-        limit = int(request.args.get('limit', 3))
+        # 查询数量限制
+        limit = 3
+
+        # 构建基础查询
+        query = Order.query.filter(
+            or_(
+                Order.initiator_id == current_user_id,
+                Order.order_id.in_(
+                    db.session.query(OrderParticipant.order_id)
+                    .filter(OrderParticipant.participator_id == current_user_id)
+                )
+            )
+        ).options(
+            db.joinedload(Order.initiator),
+            db.joinedload(Order.participants).joinedload(OrderParticipant.participator)
+        ).order_by(Order.start_time.desc())
+
+        # 如果有limit参数则应用限制
+        if limit is not None:
+            query = query.limit(int(limit))
         
-        # 查询用户作为发起者或参与者的订单
+        orders = query.all()
+        
+        # 格式化返回数据
+        trips_data = []
+        for order in orders:
+            # 处理头像数据
+            avatar_data = None
+            if order.initiator.user_avatar:
+                if isinstance(order.initiator.user_avatar, bytes):
+                    avatar_data = f"data:image/jpeg;base64,{base64.b64encode(order.initiator.user_avatar).decode('utf-8')}"
+                else:
+                    avatar_data = order.initiator.user_avatar
+            
+            trip_data = {
+                'id': order.order_id,
+                'date': order.start_time.isoformat(),
+                'startPoint': order.start_loc,
+                'endPoint': order.dest_loc,
+                'price': float(order.price),
+                'carType': order.car_type,
+                'userAvatar': avatar_data or current_app.config['DEFAULT_AVATAR_URL'],
+                'orderCount': len(order.participants),
+                'status': order.status
+            }
+            trips_data.append(trip_data)
+        
+        logger.success(f"成功获取用户 {current_user_id} 的行程记录")
+        return ApiResponse.success(
+            "获取行程记录成功",
+            data=trips_data
+        ).to_json_response(200)
+        
+    except Exception as e:
+        logger.error(f"获取行程记录失败: {str(e)}")
+        return ApiResponse.error(
+            "获取行程记录失败",
+            code=500
+        ).to_json_response(200)
+
+@order_bp.route('/user/trips/list', methods=['GET'])
+@jwt_required()
+@log_requests()
+def get_user_trip_list():
+    ""r"获取用户最近的行程记录"""
+    logger = get_logger(__name__)
+    current_user_id = get_jwt_identity()
+    logger.info(f"获取用户 {current_user_id} 的行程记录")
+    
+    try:
+        # 构建基础查询
         orders = Order.query.filter(
             or_(
                 Order.initiator_id == current_user_id,
@@ -349,7 +558,7 @@ def get_user_trips():
         ).options(
             db.joinedload(Order.initiator),
             db.joinedload(Order.participants).joinedload(OrderParticipant.participator)
-        ).order_by(Order.start_time.desc()).limit(limit).all()
+        ).order_by(Order.start_time.desc()).all()
         
         # 格式化返回数据
         trips_data = []
@@ -836,11 +1045,11 @@ def get_not_started_orders():
             "code": 500,
             "error": "服务器内部错误，获取订单失败"
         }), 500
-    
-@order_bp.route('/driver/accept', methods=['POST'])
+
+@order_bp.route('/driver/apply', methods=['POST'])
 @jwt_required()
 @log_requests()
-def accept_order():
+def driver_apply_order():
     """司机接单接口"""
     logger = get_logger(__name__)
     current_user_id = get_jwt_identity()
@@ -848,42 +1057,38 @@ def accept_order():
 
     try:
         # 参数校验
-        if not data or 'orderId' not in data:
-            raise ValueError("缺少必要参数")
+        if not data or 'orderId' not in data or 'vehicleId' not in data:
+            raise ValueError("缺少必要参数: orderId 和 vehicleId")
         
         order_id = data['orderId']
         vehicle_id = data['vehicleId']
         logger.info(f"用户 {current_user_id} 尝试用车辆 {vehicle_id} 接单 {order_id}")
 
-        # 验证车辆归属（通过多对多关系验证）
+        # ===== 1. 验证车辆归属 =====
         vehicle = Car.query.filter_by(car_id=vehicle_id).first()
         if not vehicle:
             logger.warning(f"车辆 {vehicle_id} 不存在")
             return ApiResponse.error("车辆不存在", code=404).to_json_response()
         
-        # 检查当前用户是否是车主
         is_owner = vehicle.owners.filter_by(user_id=current_user_id).count() > 0
         if not is_owner:
             logger.warning(f"用户 {current_user_id} 不是车辆 {vehicle_id} 的车主")
             return ApiResponse.error("您不是该车辆的车主", code=403).to_json_response()
 
-        # 获取订单
+        # ===== 2. 验证订单有效性 =====
         order = Order.query.get(order_id)
         if not order:
             logger.warning(f"订单 {order_id} 不存在")
             return ApiResponse.error("订单不存在", code=404).to_json_response()
-        
-        # 校验订单状态
+
         if order.status != OrderStatus.NOT_STARTED.value:
             logger.warning(f"订单 {order_id} 状态 {order.status} 不可接单")
             return ApiResponse.error("当前订单状态不可接单").to_json_response()
-        
-        # 校验订单类型
+
         if order.order_type != OrderType.PERSON_FIND_CAR.value:
             logger.warning(f"订单 {order_id} 类型 {order.order_type} 不是人找车类型")
             return ApiResponse.error("只能接人找车类型的订单").to_json_response()
-        
-        # 检查是否已参与
+
         existing = OrderParticipant.query.filter_by(
             order_id=order_id,
             participator_id=current_user_id
@@ -892,48 +1097,86 @@ def accept_order():
             logger.warning(f"用户 {current_user_id} 已参与订单 {order_id}")
             return ApiResponse.error("您已参与此订单").to_json_response()
         
-        # 添加参与者(司机)
-        participant = OrderParticipant(
-            participator_id=current_user_id,
-            order_id=order_id,
-            identity=ParticipantIdentity.DRIVER.value,
-            initiator_id=order.initiator_id
-        )
-        db.session.add(participant)
-        
-        # 更新订单信息
-        order.order_type = OrderType.CAR_FIND_PERSON.value
-        order.status = OrderStatus.IN_PROGRESS.value
-        order.car_type = f"{vehicle.car_type}"  # 记录车辆信息
-        
-        # 计算剩余座位数（考虑司机座位和原有同行人数）
-        base_seats = vehicle.seat_num - 1
-        if order.travel_partner_num:
-            order.spare_seat_num = base_seats - order.travel_partner_num
+        # ===== 3. 创建/获取私聊会话 =====
+        # 查找现有私聊（两人之间的非订单会话）
+        existing_private = db.session.query(Conversation).join(
+            ConversationParticipant,
+            Conversation.id == ConversationParticipant.conversation_id
+        ).filter(
+            # 找私聊会话: 
+            # 会话的类型为"PRIVATE"
+            # 对应的订单为"None"
+            # 参与者的数量为2
+            ConversationParticipant.type == ConversationType.PRIVATE.value,
+            Conversation.order_id.is_(None),
+            ConversationParticipant.user_id.in_([current_user_id, order.initiator_id]),
+        ).group_by(Conversation.id).having(
+            # 查询会话参与者等于2的会话
+            db.func.count(ConversationParticipant.user_id.distinct()) == 2
+        ).first()
+
+        if existing_private:
+            conversation = existing_private
+            logger.info(f"找到现有私聊会话 {conversation.id}")
         else:
-            order.spare_seat_num = base_seats
+            # 创建新私聊会话
+            conversation = Conversation(
+                type=ConversationType.PRIVATE.value,
+                created_at=datetime.utcnow(),
+            )
+            db.session.add(conversation)
+            db.session.flush()  # 获取生成的ID
 
-        # 确保座位数不会为负
-        order.spare_seat_num = max(0, order.spare_seat_num)
+            # 添加参与者
+            participants = [
+                ConversationParticipant(
+                    user_id=current_user_id,
+                    conversation_id=conversation.id,
+                    joined_at=datetime.utcnow()
+                ),
+                ConversationParticipant(
+                    user_id=order.initiator_id,
+                    conversation_id=conversation.id,
+                    joined_at=datetime.utcnow()
+                )
+            ]
+            db.session.bulk_save_objects(participants)
+            logger.info(f"创建新私聊会话 {conversation.id}")
 
-        # --- 查找会话并加入会话 ---
-        conversation = Conversation.query.filter_by(order_id=order_id).first()
-        if not ConversationParticipant.query.filter_by(
+        # ===== 4. 发送申请消息 =====
+        driver = User.query.get(current_user_id)
+        message = Message(
             conversation_id=conversation.id,
-            user_id=current_user_id
-        ).first():
-            db.session.add(ConversationParticipant(
-                user_id=current_user_id,
-                conversation_id=conversation.id,
-                joined_at=datetime.utcnow()
-            ))
-        
+            sender_id=current_user_id,
+            # 内容不会显示在聊天界面 但如果是最新消息可以显示在会话列表
+            content=f"{driver.realname or driver.username} 申请接单（车型：{vehicle.car_type}）",
+            message_type=MessageType.APPLY_ORDER.value, # 申请接单
+            created_at=datetime.utcnow(),
+            # 申请信息相关联的订单
+            order_id=order_id
+        )
+        db.session.add(message)
 
+        # TODO: 考虑: 是否需要将司机加入到订单参与者中 用状态标注
+
+        # ===== 5. 更新接收方会话状态 =====
+        # TODO: 可能需要更改参与者的字段 -- 最后读取的信息改为最新消息
+        db.session.execute(
+            db.update(ConversationParticipant)
+            .where(
+                ConversationParticipant.conversation_id == conversation.id,
+                ConversationParticipant.user_id == order.initiator_id
+            )
+            .values(unread_count=ConversationParticipant.unread_count + 1)
+        )
         db.session.commit()
 
-        logger.success(f"用户 {current_user_id} 接单 {order_id} 成功，已加入会话 {conversation.id}")
-        return ApiResponse.success("接单成功", data={
-            "conversation_id": conversation.id
+        logger.success(f"接单申请成功 订单:{order_id} 会话:{conversation.id}")
+        return ApiResponse.success("接单申请已发送", data={
+            "conversation_id": conversation.id,
+            "message_id": message.id,
+            "order_status": order.status,
+            "is_new_conversation": not bool(existing_private)
         }).to_json_response()
     
     except ValueError as e:
@@ -948,7 +1191,7 @@ def accept_order():
 @order_bp.route('/passenger/apply', methods=['POST'])
 @jwt_required()
 @log_requests()
-def apply_order():
+def passenger_apply_order():
     """乘客申请接口(拼车/搭车)"""
     logger = get_logger(__name__)
     current_user_id = get_jwt_identity()
@@ -962,18 +1205,17 @@ def apply_order():
         order_id = data['orderId']
         logger.info(f"用户 {current_user_id} 申请订单 {order_id}")
 
-        # 获取订单
+        # ===== 1. 验证订单有效性 =====
         order = Order.query.get(order_id)
         if not order:
             logger.warning(f"订单 {order_id} 不存在")
             return ApiResponse.error("订单不存在", code=404).to_json_response()
-        
-        # 校验订单状态
+
         if order.status not in [OrderStatus.NOT_STARTED.value, OrderStatus.IN_PROGRESS.value]:
             logger.warning(f"订单 {order_id} 状态 {order.status} 不可申请")
             return ApiResponse.error("当前订单状态不可申请").to_json_response()
-        
-        # 检查是否已参与
+
+        # ===== 2. 检查是否已参与 =====
         existing = OrderParticipant.query.filter_by(
             order_id=order_id,
             participator_id=current_user_id
@@ -982,46 +1224,85 @@ def apply_order():
             logger.warning(f"用户 {current_user_id} 已参与订单 {order_id}")
             return ApiResponse.error("您已参与此订单").to_json_response()
         
-        # 检查剩余座位(车找人订单)
+        # ===== 3. 检查座位情况（仅限车找人订单）=====
         if order.order_type == OrderType.CAR_FIND_PERSON.value:
             if order.spare_seat_num <= 0:
                 logger.warning(f"订单 {order_id} 座位已满")
                 return ApiResponse.error("座位已满").to_json_response()
             
-        # 添加参与者(乘客)
-        participant = OrderParticipant(
-            participator_id=current_user_id,
-            order_id=order_id,
-            identity=ParticipantIdentity.PASSENGER.value
-        )
-        db.session.add(participant)
-        
-        # 车找人订单: 更新剩余座位数
-        if order.order_type == OrderType.CAR_FIND_PERSON.value:
-            order.spare_seat_num -= 1
-            
-            # 如果座位已满，更新状态
-            if order.spare_seat_num <= 0:
-                order.status = OrderStatus.IN_PROGRESS.value
-        # 人找车订单: 更新同行人数
-        elif order.order_type == OrderType.PERSON_FIND_CAR.value:
-            order.travel_partner_num += 1
+        # ===== 4. 创建/获取私聊会话 =====
+        # 查找现有私聊（两人之间的非订单会话）
+        existing_private = db.session.query(Conversation).join(
+            ConversationParticipant,
+            Conversation.id == ConversationParticipant.conversation_id
+        ).filter(
+            # 找私聊会话: 
+            # 会话的类型为"PRIVATE"
+            # 对应的订单为"None"
+            # 参与者的数量为2
+            Conversation.type == ConversationType.PRIVATE.value,
+            Conversation.order_id.is_(None),
+            ConversationParticipant.user_id.in_([current_user_id, order.initiator_id]),
+        ).group_by(Conversation.id).having(
+            # 查询会话参与者等于2的会话
+            db.func.count(ConversationParticipant.user_id.distinct()) == 2
+        ).first()
 
-        # 查找并加入会话
-        conversation = Conversation.query.filter_by(order_id=order_id).first()
-        if not ConversationParticipant.query.filter_by(
+        if existing_private:
+            conversation = existing_private
+            logger.info(f"找到现有私聊会话 {conversation.id}")
+        else:
+            # 创建新私聊会话
+            conversation = Conversation(
+                type=ConversationType.PRIVATE.value,
+                created_at=datetime.utcnow(),
+            )
+            db.session.add(conversation)
+            db.session.flush()  # 获取生成的ID
+
+            # 添加参与者
+            participants = [
+                ConversationParticipant(
+                    user_id=current_user_id,
+                    conversation_id=conversation.id,
+                    joined_at=datetime.utcnow()
+                ),
+                ConversationParticipant(
+                    user_id=order.initiator_id,
+                    conversation_id=conversation.id,
+                    joined_at=datetime.utcnow()
+                )
+            ]
+            db.session.bulk_save_objects(participants)
+            logger.info(f"创建新私聊会话 {conversation.id}")
+
+        # ===== 5. 发送申请消息 =====
+        passenger = User.query.get(current_user_id)
+        message = Message(
             conversation_id=conversation.id,
-            user_id=current_user_id
-        ).first():
-            db.session.add(ConversationParticipant(
-                user_id=current_user_id,
-                conversation_id=conversation.id,
-                joined_at=datetime.utcnow()
-            ))
+            sender_id=current_user_id,
+            # 内容不会显示在聊天界面 但如果是最新消息可以显示在会话列表
+            content=f"{passenger.realname or passenger.username} 申请加入订单",
+            message_type=MessageType.APPLY_JOIN.value, # 申请加入
+            created_at=datetime.utcnow(),
+            # 申请信息相关联的订单
+            order_id=order_id
+        )
+        db.session.add(message)
 
+        # ===== 5. 更新接收方会话状态 =====
+        # TODO: 可能需要更改参与者的字段 -- 最后读取的信息改为最新消息
+        db.session.execute(
+            db.update(ConversationParticipant)
+            .where(
+                ConversationParticipant.conversation_id == conversation.id,
+                ConversationParticipant.user_id == order.initiator_id
+            )
+            .values(unread_count=ConversationParticipant.unread_count + 1)
+        )
         db.session.commit()
 
-        logger.success(f"用户 {current_user_id} 申请订单 {order_id} 成功，已加入会话 {conversation.id}")
+        logger.success(f"用户 {current_user_id} 申请加入订单 {order_id} 成功，已加入会话 {conversation.id}")
         return ApiResponse.success("申请成功", data={
             "conversation_id": conversation.id
         }).to_json_response()
@@ -1034,4 +1315,326 @@ def apply_order():
         logger.error(f"申请失败: {str(e)}")
         db.session.rollback()
         return ApiResponse.error("申请失败", code=500).to_json_response()
+    
+@order_bp.route('/apply/accept', methods=['POST'])
+@jwt_required()
+@log_requests()
+def accept_application():
+    """同意拼车/搭车申请"""
+
+    logger = get_logger(__name__)
+    current_user_id = get_jwt_identity()
+    data = request.get_json()
+
+    try:
+        # ==== 参数校验 ====
+        if not data or 'orderId' not in data or 'userId' not in data or 'messageId' not in data:
+            raise ValueError("缺少必要参数: orderId userId messageId")
+        
+        order_id = data['orderId']
+        applicant_user_id = data['userId']
+        message_id = data['messageId']
+        logger.info(f"用户 {current_user_id} 同意用户 {applicant_user_id} 加入订单 {order_id}")
+
+        # ==== 校验订单 ====
+        order = Order.query.get(order_id)
+        if not order:
+            return ApiResponse.error("订单不存在", code=404).to_json_response()
+        
+        # 只有订单发起人可以同意申请
+        if int(order.initiator_id) != int(current_user_id):
+            return ApiResponse.error(
+                f"您无权处理该申请。当前操作用户 ID 为 {current_user_id}，但该订单的发起人 ID 为 {order.initiator_id}。只有订单发起人可以进行此操作。",
+                code=403
+            ).to_json_response()
+        
+        # ==== 添加到订单参与者 ====
+        existing = OrderParticipant.query.filter_by(
+            order_id=order_id,
+            participator_id=applicant_user_id
+        ).first()
+
+        if not existing:
+            participant = OrderParticipant(
+                order_id=order_id,
+                participator_id=applicant_user_id,
+                initiator_id=current_user_id,
+                identity=ParticipantIdentity.PASSENGER.value, # 以乘客的身份加入
+            )
+            db.session.add(participant)
+            logger.info(f"用户 {applicant_user_id} 加入订单 {order_id}")
+        else:
+            logger.info(f"用户 {applicant_user_id} 已在订单 {order_id} 中")
+
+        # ==== 查找订单群聊会话 ====
+        conversation = Conversation.query.filter_by(
+            order_id=order_id,
+            type=ConversationType.GROUP.value
+        ).first()
+
+        # ==== 添加到会话参与者 ====
+        in_conversation = ConversationParticipant.query.filter_by(
+            conversation_id=conversation.id,
+            user_id=applicant_user_id
+        ).first()
+
+        if not in_conversation:
+            new_participant = ConversationParticipant(
+                user_id=applicant_user_id,
+                conversation_id=conversation.id,
+                joined_at=datetime.utcnow()
+            )
+            db.session.add(new_participant)
+            logger.info(f"用户 {applicant_user_id} 加入会话 {conversation.id}")
+
+        # ==== 系统消息通知 ====
+        inviter = User.query.get(current_user_id)     # 邀请者
+        applicant = User.query.get(applicant_user_id) # 申请者
+        # 邀请者发送申请者已经加入拼车的消息
+        message = Message(
+            conversation_id=conversation.id,
+            sender_id=current_user_id,
+            content=f"{applicant.username} 已加入拼车",
+            message_type=MessageType.TEXT.value,
+            created_at=datetime.utcnow()
+        )
+        db.session.add(message)
+
+        # ==== 更新参与群聊人员的未读消息数 ====
+        db.session.execute(
+            db.update(ConversationParticipant)
+            .where(
+                ConversationParticipant.conversation_id == conversation.id,
+            )
+            .values(unread_count=ConversationParticipant.unread_count + 1)
+        )
+        db.session.commit()
+
+        # ==== 更新聊天信息状态为ACCEPT ====
+        db.session.query(Message).filter_by(
+            id=message_id
+        ).update({
+            'message_type': MessageType.APPLY_JOIN_ACCEPT.value
+        })
+
+        logger.success(f"用户 {current_user_id} 受邀请加入订单 {order_id} 成功")
+        return ApiResponse.success("已同意申请", data={
+            "conversation_id": conversation.id,
+            "message_id": message.id
+        }).to_json_response()
+    except ValueError as e:
+        logger.warning(f"参数错误: {str(e)}")
+        return ApiResponse.error(str(e), code=400).to_json_response()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"接受申请失败: {str(e)}")
+        return ApiResponse.error("接受申请失败", code=500).to_json_response()
+    
+@order_bp.route('/apply/reject', methods=['POST'])
+@jwt_required()
+@log_requests()
+def reject_application():
+    """拒绝拼车/搭车申请"""
+
+    logger = get_logger(__name__)
+    current_user_id = get_jwt_identity()
+    data = request.get_json()
+
+    try:
+        # ==== 参数校验 ====
+        if not data or 'orderId' not in data or 'userId' not in data or 'messageId' not in data:
+            raise ValueError("缺少必要参数: orderId userId messageId")
+        
+        order_id = data['orderId']
+        applicant_user_id = data['userId']
+        message_id = data['messageId']
+        logger.info(f"用户 {current_user_id} 拒绝用户 {applicant_user_id} 加入订单 {order_id}")
+
+        # ==== 校验订单 ====
+        order = Order.query.get(order_id)
+        if not order:
+            return ApiResponse.error("订单不存在", code=404).to_json_response()
+        
+        if order.initiator_id != current_user_id:
+            return ApiResponse.error("您无权处理该申请", code=403).to_json_response()
+        
+        # ==== 更新聊天消息状态为 REJECT ====
+        db.session.query(Message).filter_by(
+            id=message_id
+        ).update({
+            'message_type': MessageType.APPLY_JOIN_REJECT.value
+        })
+        db.session.commit()
+
+        logger.success(f"用户 {applicant_user_id} 的申请已被拒绝")
+        return ApiResponse.success("已拒绝申请", data={
+            "message_id": message_id
+        }).to_json_response()
+    
+    except ValueError as e:
+        logger.warning(f"参数错误: {str(e)}")
+        return ApiResponse.error(str(e), code=400).to_json_response()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"拒绝申请失败: {str(e)}")
+        return ApiResponse.error("拒绝申请失败", code=500).to_json_response()
+
+@order_bp.route('/driver/accept', methods=['POST'])
+@jwt_required()
+@log_requests()
+def accept_order_application():
+    """乘客同意司机接单"""
+
+    logger = get_logger(__name__)
+    current_user_id = get_jwt_identity()
+    data = request.get_json()
+
+    try:
+        # ==== 参数校验 ====
+        if not data or 'orderId' not in data or 'userId' not in data or 'messageId' not in data:
+            raise ValueError("缺少必要参数: orderId userId messageId")
+        
+        order_id = data['orderId']
+        driver_user_id = data['userId']
+        message_id = data['messageId']
+        logger.info(f"用户 {current_user_id} 同意司机 {driver_user_id} 接单 {order_id}")
+
+        # ==== 校验订单 ====
+        order = Order.query.get(order_id)
+        if not order:
+            return ApiResponse.error("订单不存在", code=404).to_json_response()
+        
+        if order.initiator_id != current_user_id:
+            return ApiResponse.error("您无权处理该接单申请", code=403).to_json_response()
+        
+        # ==== 添加司机为订单参与者 ====
+        existing = OrderParticipant.query.filter_by(
+            order_id=order_id,
+            participator_id=driver_user_id
+        ).first()
+
+        if not existing:
+            participant = OrderParticipant(
+                order_id=order_id,
+                participator_id=driver_user_id,
+                initiator_id=current_user_id,
+                identity=ParticipantIdentity.DRIVER.value, # 身份是司机
+            )
+            db.session.add(participant)
+            logger.info(f"司机 {driver_user_id} 加入订单 {order_id}")
+        else:
+            logger.info(f"司机 {driver_user_id} 已在订单 {order_id} 中")
+
+        # ==== 查找订单群聊会话 ====
+        conversation = Conversation.query.filter_by(
+            order_id=order_id,
+            type=ConversationType.GROUP.value
+        ).first()
+
+        if not conversation:
+            return ApiResponse.error("群聊未初始化", code=500).to_json_response()
+        
+        # ==== 添加到群聊参与者 ====
+        in_conversation = ConversationParticipant.query.filter_by(
+            conversation_id=conversation.id,
+            user_id=driver_user_id
+        ).first()
+
+        if not in_conversation:
+            new_participant = ConversationParticipant(
+                user_id=driver_user_id,
+                conversation_id=conversation.id,
+                joined_at=datetime.utcnow()
+            )
+            db.session.add(new_participant)
+            logger.info(f"司机 {driver_user_id} 加入会话 {conversation.id}")
+
+        # ==== 系统消息通知 ====
+        driver = User.query.get(driver_user_id)
+        message = Message(
+            conversation_id=conversation.id,
+            sender_id=current_user_id,
+            content=f"{driver.realname or driver.username} 已接单",
+            message_type=MessageType.TEXT.value,
+            created_at=datetime.utcnow()
+        )
+        db.session.add(message)
+
+        # ==== 更新群聊未读数 ====
+        db.session.execute(
+            db.update(ConversationParticipant)
+            .where(ConversationParticipant.conversation_id == conversation.id)
+            .values(unread_count=ConversationParticipant.unread_count + 1)
+        )
+
+        db.session.commit()
+
+        # ==== 更新原消息状态为 ACCEPT ====
+        db.session.query(Message).filter_by(
+            id=message_id
+        ).update({
+            'message_type': MessageType.APPLY_ORDER_ACCEPT.value
+        })
+
+        logger.success(f"司机 {driver_user_id} 成功加入订单 {order_id}")
+        return ApiResponse.success("接单成功", data={
+            "conversation_id": conversation.id,
+            "message_id": message.id
+        }).to_json_response()
+    
+    except ValueError as e:
+        logger.warning(f"参数错误: {str(e)}")
+        return ApiResponse.error(str(e), code=400).to_json_response()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"接单处理失败: {str(e)}")
+        return ApiResponse.error("接单处理失败", code=500).to_json_response()
+
+@order_bp.route('/driver/reject', methods=['POST'])
+@jwt_required()
+@log_requests()
+def reject_order_application():
+    """乘客拒绝司机接单申请"""
+
+    logger = get_logger(__name__)
+    current_user_id = get_jwt_identity()
+    data = request.get_json()
+
+    try:
+        # ==== 参数校验 ====
+        if not data or 'orderId' not in data or 'userId' not in data or 'messageId' not in data:
+            raise ValueError("缺少必要参数: orderId userId messageId")
+        
+        order_id = data['orderId']
+        driver_user_id = data['userId']
+        message_id = data['messageId']
+        logger.info(f"用户 {current_user_id} 拒绝司机 {driver_user_id} 接单 {order_id}")
+
+         # ==== 校验订单 ====
+        order = Order.query.get(order_id)
+        if not order:
+            return ApiResponse.error("订单不存在", code=404).to_json_response()
+        
+        if order.initiator_id != current_user_id:
+            return ApiResponse.error("您无权处理该接单申请", code=403).to_json_response()
+
+        # ==== 更新原申请消息状态为 REJECT ====
+        db.session.query(Message).filter_by(
+            id=message_id
+        ).update({
+            'message_type': MessageType.APPLY_ORDER_REJECT.value
+        })
+
+        logger.success(f"用户 {current_user_id} 拒绝司机 {driver_user_id} 的接单申请成功")
+        return ApiResponse.success("已拒绝接单申请", data={
+            "message_id": message_id
+        }).to_json_response()
+    
+    except ValueError as e:
+        logger.warning(f"参数错误: {str(e)}")
+        return ApiResponse.error(str(e), code=400).to_json_response()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"拒绝接单失败: {str(e)}")
+        return ApiResponse.error("拒绝接单失败", code=500).to_json_response()
     

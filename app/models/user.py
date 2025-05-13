@@ -1,3 +1,4 @@
+import base64
 from flask import current_app
 from datetime import datetime
 from ..extensions import db
@@ -52,16 +53,41 @@ class User(db.Model):
     def verify_password(self, password):
         return check_password_hash(self.password_hash, password)
     
-    @property
-    def is_manager(self):
-        """检查用户是否为管理员"""
-        return self.manager_role is not None
-    
     # 更新最后活跃时间
     def update_last_active(self):
         self.last_active = datetime.utcnow()
         db.session.add(self)
         db.session.commit()
+
+    def get_avatar_url(self, default_avatar=None):
+        """
+        获取用户头像URL（Base64格式或默认头像）
+        :param default_avatar: 可选，自定义默认头像URL
+        :return: 头像URL字符串
+        """
+        if not self.user_avatar:
+            return default_avatar or current_app.config.get('DEFAULT_AVATAR_URL')
+        
+        if isinstance(self.user_avatar, bytes):
+            # 如果是二进制数据，转换为Base64
+            avatar_base64 = base64.b64encode(self.user_avatar).decode('utf-8')
+            return f"data:image/jpeg;base64,{avatar_base64}"
+        
+        # 如果已经是字符串（可能是Base64或URL），直接返回
+        return self.user_avatar
+
+    @classmethod
+    def get_avatar_url_by_id(cls, user_id, default_avatar=None):
+        """
+        根据用户ID获取头像URL（类方法版本）
+        :param user_id: 用户ID
+        :param default_avatar: 可选，自定义默认头像URL
+        :return: 头像URL字符串
+        """
+        user = cls.query.get(user_id)
+        if not user:
+            return default_avatar or current_app.config.get('DEFAULT_AVATAR_URL')
+        return user.get_avatar_url(default_avatar)
     
     @classmethod
     def calculate_age(cls, indentity_id):
