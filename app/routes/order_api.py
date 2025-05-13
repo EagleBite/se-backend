@@ -1107,7 +1107,7 @@ def driver_apply_order():
             # 会话的类型为"PRIVATE"
             # 对应的订单为"None"
             # 参与者的数量为2
-            ConversationParticipant.type == ConversationType.PRIVATE.value,
+            Conversation.type == ConversationType.PRIVATE.value,
             Conversation.order_id.is_(None),
             ConversationParticipant.user_id.in_([current_user_id, order.initiator_id]),
         ).group_by(Conversation.id).having(
@@ -1316,6 +1316,38 @@ def passenger_apply_order():
         db.session.rollback()
         return ApiResponse.error("申请失败", code=500).to_json_response()
     
+@order_bp.route('/passenger/invite', methods=['POST'])
+@jwt_required()
+@log_requests()
+def passenger_invite_order():
+    """发起人邀请乘客接口"""
+    logger = get_logger(__name__)
+    current_user_id = get_jwt_identity()
+    data = request.get_json()
+
+    try:
+        # 参数校验
+        if not data or 'orderId' not in data:
+            raise ValueError("缺少必要参数: orderId")
+        
+        order_id = data['orderId']
+        invitee_user_id = data['userId']
+        logger.info(f"用户 {current_user_id} 尝试邀请用户 {invitee_user_id} 加入订单 {order_id}")
+
+        # ===== 1. 验证订单有效性 =====
+        order = Order.query.get(order_id)
+        if not order:
+            logger.warning(f"订单 {order_id} 不存在")
+            return ApiResponse.error("订单不存在", code=404).to_json_response()
+
+        if order.initiator_id != current_user_id:
+            logger.warning(f"用户 {current_user_id} 不是订单 {order_id} 的发起人")
+            return ApiResponse.error("只有订单发起人可以邀请乘客", code=403).to_json_response()
+
+        if order.status not in [OrderStatus.NOT_STARTED.value, OrderStatus.IN_PROGRESS.value]:
+            logger.warning(f"订单 {order_id} 状态 {order.status} 不可邀请")
+            return ApiResponse.error("当前订单状态不可邀请").to_json_response()        
+
 @order_bp.route('/apply/accept', methods=['POST'])
 @jwt_required()
 @log_requests()
@@ -1416,7 +1448,8 @@ def accept_application():
         ).update({
             'message_type': MessageType.APPLY_JOIN_ACCEPT.value
         })
-
+        db.session.commit() 
+        
         logger.success(f"用户 {current_user_id} 受邀请加入订单 {order_id} 成功")
         return ApiResponse.success("已同意申请", data={
             "conversation_id": conversation.id,
@@ -1504,7 +1537,7 @@ def accept_order_application():
         if not order:
             return ApiResponse.error("订单不存在", code=404).to_json_response()
         
-        if order.initiator_id != current_user_id:
+        if int(order.initiator_id) != int(current_user_id):
             return ApiResponse.error("您无权处理该接单申请", code=403).to_json_response()
         
         # ==== 添加司机为订单参与者 ====
@@ -1567,14 +1600,13 @@ def accept_order_application():
             .values(unread_count=ConversationParticipant.unread_count + 1)
         )
 
-        db.session.commit()
-
         # ==== 更新原消息状态为 ACCEPT ====
         db.session.query(Message).filter_by(
             id=message_id
         ).update({
             'message_type': MessageType.APPLY_ORDER_ACCEPT.value
         })
+        db.session.commit()
 
         logger.success(f"司机 {driver_user_id} 成功加入订单 {order_id}")
         return ApiResponse.success("接单成功", data={
@@ -1624,6 +1656,7 @@ def reject_order_application():
         ).update({
             'message_type': MessageType.APPLY_ORDER_REJECT.value
         })
+        db.session.commit()
 
         logger.success(f"用户 {current_user_id} 拒绝司机 {driver_user_id} 的接单申请成功")
         return ApiResponse.success("已拒绝接单申请", data={
@@ -1638,3 +1671,5 @@ def reject_order_application():
         logger.error(f"拒绝接单失败: {str(e)}")
         return ApiResponse.error("拒绝接单失败", code=500).to_json_response()
     
+
+
