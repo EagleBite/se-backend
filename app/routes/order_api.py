@@ -66,6 +66,16 @@ def get_order_list():
         orders = []
         for order in all_orders:
             user = order.initiator
+            avatar_data = None
+            if order.initiator.user_avatar:
+                if isinstance(order.initiator.user_avatar, bytes):
+                    avatar_data = f"data:image/jpeg;base64,{base64.b64encode(order.initiator.user_avatar).decode('utf-8')}"
+                elif isinstance(order.initiator.user_avatar, str) and order.initiator.user_avatar.startswith("http"):
+                    avatar_data = order.initiator.user_avatar  # 如果是 URL，则直接使用
+                else:
+                    avatar_data = current_app.config['DEFAULT_AVATAR_URL']  # 默认头像
+            else:
+                avatar_data = current_app.config['DEFAULT_AVATAR_URL']  # 默认头像
             orders.append({
                 'id': order.order_id,
                 'infoType': '人找车' if order.order_type == OrderType.PERSON_FIND_CAR.value else '车找人',
@@ -78,7 +88,7 @@ def get_order_list():
                 'maxSeats': order.spare_seat_num,
                 'carType': order.car_type,
                 'orderCount': user.order_time,
-                'userAvatar': user.get_avatar_url(),
+                'userAvatar': avatar_data,
                 'status': order.status,
                 'startTime': order.start_time.isoformat()
             })

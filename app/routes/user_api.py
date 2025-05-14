@@ -204,6 +204,7 @@ def upload_avatar(user_id):
 
     try:
         user = User.query.get(user_id)
+        print(user_id)
         if not user:
             logger.error(f"用户不存在: {user_id}")
             return jsonify({"code": 404, "message": "用户不存在"}), 404
