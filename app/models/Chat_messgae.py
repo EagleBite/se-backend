@@ -7,7 +7,9 @@ class MessageType(Enum):
     TEXT = 'text'                   # 文本信息
     IMAGE = 'image'                 # 图片信息
     FILE = 'file'                   # 文件信息   
-    INVITATION = 'invitation'       # 拼车邀请信息
+    INVITATION = 'invitation'                     # 拼车邀请信息
+    INVITATION_ACCEPT = 'invitation_accept'       # 拼车邀请信息 -- 同意
+    INVITATION_REJECT = 'invitation_reject'       # 拼车邀请信息 -- 拒绝
     APPLY_JOIN = 'apply_join'                     # 加入申请（乘客）
     APPLY_JOIN_ACCEPT = 'apply_join_accept'       # 加入申请（乘客） -- 同意
     APPLY_JOIN_REJECT = 'apply_join_reject'       # 加入申请（乘客） -- 拒绝

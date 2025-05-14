@@ -3,7 +3,8 @@ from datetime import datetime
 from ..extensions import socketio
 from ..utils.logger import get_logger
 from ..extensions import db
-from ..models import User, Message, Conversation, ConversationParticipant
+from ..models import User, Message, Conversation, ConversationParticipant, Order
+from ..models.Chat_messgae import MessageType
 from flask import request, g
 from functools import wraps
 from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
@@ -203,6 +204,90 @@ def handle_send_message(data):
         db.session.rollback()
         emit('message_error', {'error': '发送消息失败'})
 
+@socketio.on('send_invitation')
+@socketio_jwt_required
+def handle_send_invitation(data):
+    """发送订单邀请消息到指定会话"""
+    logger = get_logger(__name__)
+    sender_id = g.socketio_user['id']
+
+    try:
+        logger.info(data)
+        # 参数校验
+        if not data or 'conversationId' not in data or 'orderId' not in data:
+            raise ValueError("缺少必要参数: conversationId 或 orderId")
+        
+        conversation_id = data['conversationId']
+        order_id = data['orderId']
+        
+        logger.info(f"用户 {sender_id} 在会话 {conversation_id} 发送订单 {order_id} 邀请")
+
+        # 验证会话是否存在
+        conversation = Conversation.query.get(conversation_id)
+        if not conversation:
+            logger.warning(f"会话 {conversation_id} 不存在")
+            emit('invitation_error', {'error': '会话不存在'})
+            return
+
+        # 验证订单是否存在
+        order = Order.query.get(order_id)
+        if not order:
+            logger.warning(f"订单 {order_id} 不存在")
+            emit('invitation_error', {'error': '订单不存在'})
+            return
+        
+        # 创建邀请消息
+        sender = User.query.get(sender_id)
+        message = Message(
+            conversation_id=conversation_id,
+            sender_id=sender_id,
+            content=f"{sender.username} 邀请加入订单",
+            message_type=MessageType.INVITATION.value,
+            created_at=datetime.utcnow(),
+            order_id=order_id
+        )
+        db.session.add(message)
+        db.session.commit()
+
+        # 构建返回数据
+        message_data = {
+            'id': message.id,
+            'conversationId': conversation_id,
+            'sender': {
+                'id': sender_id,
+                'username': sender.username,
+                'avatar': sender.user_avatar
+            },
+            'content': message.content,
+            'createdAt': message.created_at.isoformat(),
+            'type': MessageType.INVITATION.value,
+            'orderId': order_id,
+            'orderInfo': {  # 一些订单基本信息
+                'initiator_id': order.initiator_id,
+                'start_loc': order.start_loc,
+                'dest_loc': order.dest_loc,
+                'start_time': order.start_time.isoformat(),
+                'price': str(order.price),
+                'status': order.status,
+                'order_type': order.order_type,
+                'car_type': order.car_type,
+                'travel_partner_num': order.travel_partner_num,
+                'spare_seat_num': order.spare_seat_num
+            }
+        }
+
+        # 广播消息到会话房间
+        room = f'conversation_{conversation_id}'
+        emit('new_message', message_data, room=room)
+        logger.info(f"邀请消息已发送到房间 {room}")
+
+    except ValueError as e:
+        logger.warning(f"参数错误: {str(e)}")
+        emit('invitation_error', {'error': str(e)})
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"发送邀请失败: {str(e)}")
+        emit('invitation_error', {'error': '发送邀请失败'})
 
 @socketio.on('test_event') 
 @socketio_jwt_required

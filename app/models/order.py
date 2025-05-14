@@ -18,6 +18,20 @@ class OrderStatus(Enum):
     @classmethod
     def values(cls):
         return [member.value for member in cls]   
+    
+    @classmethod
+    def get_chinese(cls, status):
+        """获取状态的中文描述"""
+        mapping = {
+            cls.PENDING.value: '待审核',
+            cls.COMPLETED.value: '已完成',
+            cls.REJECTED.value: '已拒绝',
+            cls.NOT_STARTED.value: '未开始',
+            cls.IN_PROGRESS.value: '进行中',
+            cls.TO_PAY.value: '待付款',
+            cls.TO_REVIEW.value: '待评价'
+        }
+        return mapping.get(status, '未知状态')
 
 class OrderType(Enum):
     """订单类型枚举"""

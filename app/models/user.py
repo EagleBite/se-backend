@@ -120,7 +120,7 @@ class User(db.Model):
                 gender=data['gender'],
                 telephone=data['telephone'],
                 password_hash=generate_password_hash(data['password']),
-                user_avatar=current_app.config['DEFAULT_AVATAR_URL']  # 默认头像
+                user_avatar=None  # 默认头像
             )
             db.session.add(user)
             user.update_last_active()

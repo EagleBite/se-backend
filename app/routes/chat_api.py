@@ -194,7 +194,8 @@ def get_messages(conversation_id):
             # 如果是申请相关的消息，加入订单信息
             if msg.message_type in [
                 MessageType.APPLY_JOIN.value, MessageType.APPLY_JOIN_ACCEPT.value, MessageType.APPLY_JOIN_REJECT.value,
-                MessageType.APPLY_ORDER.value, MessageType.APPLY_ORDER_ACCEPT.value, MessageType.APPLY_ORDER_REJECT.value
+                MessageType.APPLY_ORDER.value, MessageType.APPLY_ORDER_ACCEPT.value, MessageType.APPLY_ORDER_REJECT.value,
+                MessageType.INVITATION.value, MessageType.INVITATION_ACCEPT.value, MessageType.INVITATION_REJECT.value
                 ]:
                 # 查找相关订单
                 order = Order.query.filter_by(
